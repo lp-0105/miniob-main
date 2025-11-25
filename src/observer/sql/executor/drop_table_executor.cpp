@@ -72,8 +72,12 @@ RC DropTableExecutor::execute(SQLStageEvent *sql_event)
   }
 
   // 执行删除表操作
-  // 由于Db类没有实现drop_table方法，我们返回一个未实现错误
-  // 在实际应用中，需要实现表删除功能
-  LOG_WARN("drop table is not implemented yet. table name=%s", table_name);
-  return RC::UNIMPLEMENTED;
+  RC rc = db->drop_table(table_name.c_str());
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to drop table. table name=%s, rc=%d:%s", table_name.c_str(), rc, strrc(rc));
+    return rc;
+  }
+
+  LOG_INFO("Successfully dropped table. table name=%s", table_name.c_str());
+  return RC::SUCCESS;
 }
