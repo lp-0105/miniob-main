@@ -81,7 +81,7 @@ function do_init
 
   current_dir=$PWD
 
-  MAKE_COMMAND="make --silent"
+  MAKE_COMMAND="make --silent -j24"
 
   # build libevent
   cd ${TOPDIR}/deps/3rd/libevent && \
