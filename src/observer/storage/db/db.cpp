@@ -442,6 +442,20 @@ RC Db::drop_table(const char *table_name)
     return rc;
   }
 
+  // 删除所有索引文件
+  const TableMeta &table_meta = table->table_meta();
+  const int index_num = table_meta.index_num();
+  for (int i = 0; i < index_num; i++) {
+    const IndexMeta *index_meta = table_meta.index(i);
+    string index_file_path = table_index_file(path_.c_str(), table_name, index_meta->name());
+    
+    if (filesystem::exists(index_file_path) && remove(index_file_path.c_str()) != 0) {
+      LOG_ERROR("Failed to remove index file. file=%s, errno=%s", 
+                index_file_path.c_str(), strerror(errno));
+      // 继续尝试删除其他索引文件
+    }
+  }
+  
   // 从内存中删除表对象
   opened_tables_.erase(iter);
   
