@@ -9,47 +9,41 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 //
-// Created by Wangyunlai on 2022/5/22.
+// Created by Longda on 2021/4/13.
 //
 
 #pragma once
 
-#include "common/sys/rc.h"
-#include "sql/stmt/stmt.h"
+#include "sql/operator/logical_operator.h"
+#include "storage/field/field.h"
 #include "sql/expr/expression.h"
 
 class Table;
-class FilterStmt;
 
 /**
- * @brief 更新语句
- * @ingroup Statement
+ * @brief 更新逻辑算子
+ * @ingroup LogicalOperator
  */
-class UpdateStmt : public Stmt
+class UpdateLogicalOperator : public LogicalOperator
 {
 public:
-  UpdateStmt() = default;
-  UpdateStmt(Table *table, const char *attribute_name, Value *values, int value_amount, FilterStmt *filter_stmt);
-  UpdateStmt(Table *table, const char *attribute_name, unique_ptr<Expression> expression, FilterStmt *filter_stmt);
-  ~UpdateStmt() override;
+  UpdateLogicalOperator(Table *table, const char *attribute_name, Value *values, int value_amount);
+  UpdateLogicalOperator(Table *table, const char *attribute_name, unique_ptr<Expression> expression);
+  virtual ~UpdateLogicalOperator() = default;
 
-public:
-  StmtType type() const override { return StmtType::UPDATE; }
-  static RC create(Db *db, const UpdateSqlNode &update_sql, Stmt *&stmt);
+  LogicalOperatorType type() const override { return LogicalOperatorType::UPDATE; }
+  OpType get_op_type() const override { return OpType::LOGICALUPDATE; }
 
-public:
   Table *table() const { return table_; }
   const char *attribute_name() const { return attribute_name_; }
   Value *values() const { return values_; }
   int value_amount() const { return value_amount_; }
   Expression* expression() const { return expression_.get(); }
-  FilterStmt *filter_stmt() const { return filter_stmt_; }
 
-private:
-  Table *table_        = nullptr;
+private:  
+  Table *table_ = nullptr;
   const char *attribute_name_ = nullptr;
-  Value *values_       = nullptr;
-  int    value_amount_ = 0;
+  Value *values_ = nullptr;
+  int value_amount_ = 0;
   unique_ptr<Expression> expression_ = nullptr;  // 表达式更新时的表达式
-  FilterStmt *filter_stmt_ = nullptr;
 };

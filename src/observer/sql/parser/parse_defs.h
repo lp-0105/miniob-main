@@ -134,6 +134,8 @@ struct UpdateSqlNode
   string                   attribute_name;  ///< 更新的字段，仅支持一个字段
   Value                    value;           ///< 更新的值，仅支持一个字段
   vector<ConditionSqlNode> conditions;
+  bool                     is_expression = false;  ///< 是否为表达式更新
+  unique_ptr<Expression>   expression;      ///< 表达式更新时的表达式
 };
 
 /**

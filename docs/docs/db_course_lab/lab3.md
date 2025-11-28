@@ -53,7 +53,7 @@ MVCC（Multi-Version Concurrency Control）是一种并发控制技术，其核�
 ```
 RC insert_record_with_trx(Record &record, Trx* trx) override;
 RC delete_record_with_trx(const Record &record, Trx* trx) override;
-RC update_record_with_trx(const Record &old_record, const Record &new_record, Trx* trx) override;
+RC update_record_with_trx(Trx* trx, const Record &old_record, const Record &new_record) override;
 ```
 
 你可以通过开启多个 obclient 测试 MiniOB 中的事务。

@@ -42,6 +42,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/hash_group_by_physical_operator.h"
 #include "sql/operator/scalar_group_by_physical_operator.h"
 #include "sql/operator/table_scan_vec_physical_operator.h"
+#include "sql/operator/update_logical_operator.h"
+#include "sql/operator/update_physical_operator.h"
 #include "sql/optimizer/physical_plan_generator.h"
 
 using namespace std;
@@ -73,6 +75,10 @@ RC PhysicalPlanGenerator::create(LogicalOperator &logical_operator, unique_ptr<P
 
     case LogicalOperatorType::DELETE: {
       return create_plan(static_cast<DeleteLogicalOperator &>(logical_operator), oper, session);
+    } break;
+
+    case LogicalOperatorType::UPDATE: {
+      return create_plan(static_cast<UpdateLogicalOperator &>(logical_operator), oper, session);
     } break;
 
     case LogicalOperatorType::EXPLAIN: {
@@ -467,5 +473,48 @@ RC PhysicalPlanGenerator::create_vec_plan(ExplainLogicalOperator &explain_oper, 
   }
 
   oper = std::move(explain_physical_oper);
+  return rc;
+}
+
+RC PhysicalPlanGenerator::create_plan(UpdateLogicalOperator &update_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
+{
+  RC rc = RC::SUCCESS;
+  
+  // 获取更新操作的子操作符
+  vector<unique_ptr<LogicalOperator>> &child_opers = update_oper.children();
+  
+  // 创建更新物理操作符
+  unique_ptr<PhysicalOperator> update_physical_oper;
+  
+  // 根据是常量值更新还是表达式更新创建不同的UpdatePhysicalOperator
+  if (update_oper.expression() != nullptr) {
+    // 表达式更新
+    unique_ptr<Expression> expression(update_oper.expression()->copy());
+    update_physical_oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
+        update_oper.table(), 
+        update_oper.attribute_name(), 
+        std::move(expression)));
+  } else {
+    // 常量值更新
+    update_physical_oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
+        update_oper.table(), 
+        update_oper.attribute_name(), 
+        update_oper.values(), 
+        update_oper.value_amount()));
+  }
+  
+  // 添加子操作符
+  for (unique_ptr<LogicalOperator> &child_oper : child_opers) {
+    unique_ptr<PhysicalOperator> child_physical_oper;
+    rc = create(*child_oper, child_physical_oper, session);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to create child physical operator. rc=%s", strrc(rc));
+      return rc;
+    }
+
+    update_physical_oper->add_child(std::move(child_physical_oper));
+  }
+
+  oper = std::move(update_physical_oper);
   return rc;
 }

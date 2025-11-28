@@ -103,6 +103,85 @@ RC HeapTableEngine::delete_record(const Record &record)
   return rc;
 }
 
+RC HeapTableEngine::delete_record_with_trx(const Record &record, Trx *trx)
+{
+  RC rc = RC::SUCCESS;
+  
+  // 1. 删除记录的索引项
+  rc = delete_entry_of_indexes(record.data(), record.rid(), true);
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to delete index entries. table=%s, rc=%s", table_meta_->name(), strrc(rc));
+    return rc;
+  }
+  
+  // 2. 删除记录数据
+  rc = record_handler_->delete_record(&record.rid());
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to delete record. table=%s, rc=%s", table_meta_->name(), strrc(rc));
+    
+    // 回滚：重新插入记录的索引项
+    RC rc2 = insert_entry_of_indexes(record.data(), record.rid());
+    if (rc2 != RC::SUCCESS) {
+      LOG_ERROR("Failed to rollback index entries. table=%s, rc=%s", table_meta_->name(), strrc(rc2));
+    }
+    return rc;
+  }
+  
+  return rc;
+}
+
+RC HeapTableEngine::update_record_with_trx(Trx *trx, const Record &old_record, const Record &new_record)
+{
+  RC rc = RC::SUCCESS;
+  
+  // 0. 检查记录的并发冲突
+  rc = trx->visit_record(table_, const_cast<Record&>(old_record), ReadWriteMode::READ_WRITE);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("Failed to check record visibility. table=%s, rc=%s", table_meta_->name(), strrc(rc));
+    return rc;
+  }
+  
+  // 1. 更新记录数据
+  rc = record_handler_->update_record(new_record.data(), new_record.len(), const_cast<RID*>(&new_record.rid()));
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to update record. table=%s, rc=%s", table_meta_->name(), strrc(rc));
+    return rc;
+  }
+  
+  // 2. 删除旧记录的索引项
+  rc = delete_entry_of_indexes(old_record.data(), old_record.rid(), false);
+  if (rc != RC::SUCCESS && rc != RC::RECORD_INVALID_KEY) {
+    LOG_ERROR("Failed to delete old index entries. table=%s, rc=%s", table_meta_->name(), strrc(rc));
+    
+    // 回滚：恢复旧记录数据
+    RC rc2 = record_handler_->update_record(old_record.data(), old_record.len(), const_cast<RID*>(&old_record.rid()));
+    if (rc2 != RC::SUCCESS) {
+      LOG_ERROR("Failed to rollback record data. table=%s, rc=%s", table_meta_->name(), strrc(rc2));
+    }
+    return rc;
+  }
+  
+  // 3. 插入新记录的索引项
+  rc = insert_entry_of_indexes(new_record.data(), new_record.rid());
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to insert new index entries. table=%s, rc=%s", table_meta_->name(), strrc(rc));
+    
+    // 回滚：恢复旧记录数据和索引
+    RC rc2 = record_handler_->update_record(old_record.data(), old_record.len(), const_cast<RID*>(&old_record.rid()));
+    if (rc2 != RC::SUCCESS) {
+      LOG_ERROR("Failed to rollback record data. table=%s, rc=%s", table_meta_->name(), strrc(rc2));
+    }
+    
+    rc2 = insert_entry_of_indexes(old_record.data(), old_record.rid());
+    if (rc2 != RC::SUCCESS) {
+      LOG_ERROR("Failed to rollback index entries. table=%s, rc=%s", table_meta_->name(), strrc(rc2));
+    }
+    return rc;
+  }
+  
+  return rc;
+}
+
 RC HeapTableEngine::get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWriteMode mode)
 {
   scanner = new HeapRecordScanner(table_, *data_buffer_pool_, trx, db_->log_handler(), mode, nullptr);
@@ -239,8 +318,20 @@ RC HeapTableEngine::delete_entry_of_indexes(const char *record, const RID &rid, 
   for (Index *index : indexes_) {
     rc = index->delete_entry(record, &rid);
     if (rc != RC::SUCCESS) {
-      if (rc != RC::RECORD_INVALID_KEY || !error_on_not_exists) {
+      // 允许RECORD_NOT_EXIST和RECORD_INVALID_KEY错误，因为索引项可能已经被删除
+      if (rc != RC::RECORD_INVALID_KEY && rc != RC::RECORD_NOT_EXIST) {
+        LOG_ERROR("Failed to delete index entry. table=%s, index=%s, rc=%s",
+                  table_meta_->name(), index->index_meta().name(), strrc(rc));
         break;
+      } else if (rc == RC::RECORD_NOT_EXIST && error_on_not_exists) {
+        LOG_WARN("Index entry does not exist. table=%s, index=%s",
+                 table_meta_->name(), index->index_meta().name());
+        break;
+      } else {
+        // 对于RECORD_NOT_EXIST和RECORD_INVALID_KEY，继续处理下一个索引
+        LOG_TRACE("Index entry already deleted or invalid. table=%s, index=%s, rc=%s",
+                  table_meta_->name(), index->index_meta().name(), strrc(rc));
+        rc = RC::SUCCESS; // 重置为成功，继续处理其他索引
       }
     }
   }

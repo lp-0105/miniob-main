@@ -39,7 +39,7 @@ RC LsmMvccTrx::delete_record(Table *table, Record &record)
 
 RC LsmMvccTrx::update_record(Table *table, Record &old_record, Record &new_record)
 {
-  return table->update_record_with_trx(old_record, new_record, this);
+  return table->update_record_with_trx(this, old_record, new_record);
 }
 /**
  * 在 index scan 中使用的，需要适配 index scan
