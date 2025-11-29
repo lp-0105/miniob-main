@@ -148,7 +148,7 @@ RC HeapTableEngine::update_record_with_trx(Trx *trx, const Record &old_record, c
   // 更新记录数据
   rc = record_handler_->update_record(new_record.data(), new_record.len(), &new_record.rid());
   if (rc != RC::SUCCESS) {
-    LOG_WARN("failed to update record. rc=%s", strrc(rc));
+    LOG_WARN("failed to update record. rc=%s, rid=%s", strrc(rc), new_record.rid().to_string().c_str());
     return rc;
   }
 
@@ -157,23 +157,37 @@ RC HeapTableEngine::update_record_with_trx(Trx *trx, const Record &old_record, c
     // 删除旧索引项
     rc = index->delete_entry(old_record.data(), &old_record.rid());
     if (rc != RC::SUCCESS) {
-      LOG_WARN("failed to delete index entry. rc=%s", strrc(rc));
+      LOG_WARN("failed to delete index entry. rc=%s, index=%s, rid=%s", 
+               strrc(rc), index->index_meta().name(), old_record.rid().to_string().c_str());
       // 回滚记录更新
-      record_handler_->update_record(old_record.data(), old_record.len(), &old_record.rid());
+      RC rc2 = record_handler_->update_record(old_record.data(), old_record.len(), &old_record.rid());
+      if (rc2 != RC::SUCCESS) {
+        LOG_ERROR("failed to rollback record update. rc=%s, rid=%s", strrc(rc2), old_record.rid().to_string().c_str());
+      }
       return rc;
     }
 
     // 插入新索引项
     rc = index->insert_entry(new_record.data(), &new_record.rid());
     if (rc != RC::SUCCESS) {
-      LOG_WARN("failed to insert index entry. rc=%s", strrc(rc));
+      LOG_WARN("failed to insert index entry. rc=%s, index=%s, rid=%s", 
+               strrc(rc), index->index_meta().name(), new_record.rid().to_string().c_str());
       // 回滚：恢复旧索引项和记录
-      index->insert_entry(old_record.data(), &old_record.rid());
-      record_handler_->update_record(old_record.data(), old_record.len(), &old_record.rid());
+      RC rc2 = index->insert_entry(old_record.data(), &old_record.rid());
+      if (rc2 != RC::SUCCESS) {
+        LOG_ERROR("failed to rollback index deletion. rc=%s, index=%s, rid=%s", 
+                  strrc(rc2), index->index_meta().name(), old_record.rid().to_string().c_str());
+      }
+      
+      RC rc3 = record_handler_->update_record(old_record.data(), old_record.len(), &old_record.rid());
+      if (rc3 != RC::SUCCESS) {
+        LOG_ERROR("failed to rollback record update. rc=%s, rid=%s", strrc(rc3), old_record.rid().to_string().c_str());
+      }
       return rc;
     }
   }
 
+  LOG_TRACE("successfully updated record and indexes. rid=%s", new_record.rid().to_string().c_str());
   return RC::SUCCESS;
 }
 

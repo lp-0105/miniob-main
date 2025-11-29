@@ -114,115 +114,61 @@ RC UpdatePhysicalOperator::next()
       }
       memcpy(new_data, record.data(), record.len());
       new_record.set_data(new_data, record.len());
-      
-      // 逐个更新字段
+
+      // 更新所有字段
       for (size_t i = 0; i < attribute_names_.size(); i++) {
-          // 直接通过字段名获取字段元数据，而不是使用可能不正确的索引
-          const FieldMeta *field_meta = table_->table_meta().field(attribute_names_[i].c_str());
-          if (nullptr == field_meta) {
-            LOG_WARN("failed to get field meta for %s", attribute_names_[i].c_str());
-            free(new_record.data());
-            return RC::SCHEMA_FIELD_NOT_EXIST;
-          }
+        // 获取字段索引
+        const FieldMeta *field_meta = table_->table_meta().field(attribute_names_[i].c_str());
+        if (field_meta == nullptr) {
+          LOG_WARN("field not found: %s", attribute_names_[i].c_str());
+          free(new_data);  // 修复：释放正确的内存
+          return RC::SCHEMA_FIELD_MISSING;
+        }
+
+        // 检查values_list_是否有效
+        if (i >= values_list_.size() || values_list_[i] == nullptr) {
+          LOG_WARN("invalid values list for field %s", attribute_names_[i].c_str());
+          free(new_data);  // 修复：释放正确的内存
+          return RC::INTERNAL;
+        }
+
+        // 检查values_list_[i]是否为空或无效
+        if (values_list_[i][0].data() == nullptr) {
+          LOG_WARN("null value for field %s", attribute_names_[i].c_str());
+          // 如果值为空，填充零
+          memset(new_data + field_meta->offset(), 0, field_meta->len());
+          continue;
+        }
+
+        size_t copy_len = field_meta->len();
         
-        if (!expressions_.empty()) {
-          // 表达式更新
-          // 创建一个记录副本，用于表达式计算，避免锁冲突
-          Record expr_record;
-          expr_record.set_rid(record.rid());
-          char *expr_data = static_cast<char*>(malloc(record.len()));
-          if (nullptr == expr_data) {
-            LOG_WARN("failed to allocate memory for expression record");
-            free(new_record.data());
-            return RC::NOMEM;
-          }
-          memcpy(expr_data, record.data(), record.len());
-          expr_record.set_data(expr_data, record.len());
-    
-          RowTuple expr_tuple;
-          expr_tuple.set_record(&expr_record);
-          const vector<FieldMeta> *fields = table_->table_meta().field_metas();
-          expr_tuple.set_schema(table_, fields);
-          
-          // 计算表达式值
-          Value expr_value;
-          RC rc = expressions_[i]->get_value(expr_tuple, expr_value);
-          if (rc != RC::SUCCESS) {
-            LOG_WARN("failed to get expression value");
-            free(expr_record.data());
-            free(new_record.data());
-            return rc;
-          }
-          
-          // 使用Record的set_field方法更新字段
-          size_t copy_len = field_meta->len();
-          const size_t data_len = expr_value.length();
-          if (field_meta->type() == AttrType::CHARS) {
-            // 修复CHAR类型字符串截断问题
-            if (data_len < static_cast<size_t>(field_meta->len())) {
-              copy_len = data_len;
-              // 确保字符串以null结尾
-              memset(static_cast<char*>(new_record.data()) + field_meta->offset() + data_len, 0, field_meta->len() - data_len);
-            } else {
-              copy_len = field_meta->len() - 1;  // 保留一个字节给null终止符
-              // 确保字符串以null结尾
-              static_cast<char*>(new_record.data())[field_meta->offset() + copy_len] = '\0';
-            }
-            // 直接使用expr_value.data()而不是get_string().c_str()，避免临时对象问题
-            const char *src_data = expr_value.data();
-            if (src_data != nullptr) {
-              memcpy(static_cast<char*>(new_record.data()) + field_meta->offset(), src_data, copy_len);
-            } else {
-              // 如果数据为空，填充零
-              memset(static_cast<char*>(new_record.data()) + field_meta->offset(), 0, copy_len);
-            }
+        // 检查数据指针是否为空
+        const char *src_data = values_list_[i][0].data();
+        if (src_data == nullptr) {
+          LOG_WARN("null data pointer for field %s", attribute_names_[i].c_str());
+          // 如果数据为空，填充零
+          memset(new_data + field_meta->offset(), 0, copy_len);
+          continue;
+        }
+        
+        const size_t data_len = values_list_[i][0].length();
+        
+        if (field_meta->type() == AttrType::CHARS) {
+          // 修复CHAR类型字符串截断问题
+          if (data_len < static_cast<size_t>(field_meta->len())) {
+            copy_len = data_len;
+            // 确保字符串以null结尾
+            memset(new_data + field_meta->offset() + data_len, 0, field_meta->len() - data_len);
           } else {
-            // 非字符串类型，直接复制数据
-            memcpy(static_cast<char*>(new_record.data()) + field_meta->offset(), expr_value.data(), copy_len);
+            copy_len = field_meta->len() - 1;  // 保留一个字节给null终止符
+            // 确保字符串以null结尾
+            new_data[field_meta->offset() + copy_len] = '\0';
           }
-          
-          free(expr_record.data());
+          // 直接使用values_list_[i][0].data()而不是get_string().c_str()，避免临时对象问题
+          memcpy(new_data + field_meta->offset(), src_data, copy_len);
         } else {
-          // 常量值更新
-          // 使用Record的set_field方法更新字段
-          size_t copy_len = field_meta->len();
-          
-          // 检查Value指针是否为空
-          if (values_list_[i] == nullptr) {
-            LOG_WARN("null Value pointer for field %s", attribute_names_[i].c_str());
-            // 如果Value指针为空，填充零
-            memset(static_cast<char*>(new_record.data()) + field_meta->offset(), 0, copy_len);
-            continue;
-          }
-          
-          const size_t data_len = values_list_[i][0].length();
-          
-          // 检查数据指针是否为空
-          const char *src_data = values_list_[i][0].data();
-          if (src_data == nullptr) {
-            LOG_WARN("null data pointer for field %s", attribute_names_[i].c_str());
-            // 如果数据为空，填充零
-            memset(static_cast<char*>(new_record.data()) + field_meta->offset(), 0, copy_len);
-            continue;
-          }
-          
-          if (field_meta->type() == AttrType::CHARS) {
-            // 修复CHAR类型字符串截断问题
-            if (data_len < static_cast<size_t>(field_meta->len())) {
-              copy_len = data_len;
-              // 确保字符串以null结尾
-              memset(static_cast<char*>(new_record.data()) + field_meta->offset() + data_len, 0, field_meta->len() - data_len);
-            } else {
-              copy_len = field_meta->len() - 1;  // 保留一个字节给null终止符
-              // 确保字符串以null结尾
-              static_cast<char*>(new_record.data())[field_meta->offset() + copy_len] = '\0';
-            }
-            // 直接使用values_list_[i][0].data()而不是get_string().c_str()，避免临时对象问题
-            memcpy(static_cast<char*>(new_record.data()) + field_meta->offset(), src_data, copy_len);
-          } else {
-            // 非字符串类型，直接复制数据
-            memcpy(static_cast<char*>(new_record.data()) + field_meta->offset(), src_data, copy_len);
-          }
+          // 非字符串类型，直接复制数据
+          memcpy(new_data + field_meta->offset(), src_data, copy_len);
         }
       }
       
@@ -230,12 +176,12 @@ RC UpdatePhysicalOperator::next()
       rc = table_->update_record_with_trx(trx, record, new_record);
       if (rc != RC::SUCCESS) {
         LOG_WARN("failed to update record: %s", strrc(rc));
-        free(new_record.data());
+        free(new_data);  // 修复：释放正确的内存
         return rc;
       }
       
       // 释放内存
-      free(new_record.data());
+      free(new_data);  // 修复：释放正确的内存
     } else {
       // 单字段更新
       // 创建新的记录
@@ -260,7 +206,7 @@ RC UpdatePhysicalOperator::next()
         char *expr_data = static_cast<char*>(malloc(record.len()));
         if (nullptr == expr_data) {
           LOG_WARN("failed to allocate memory for expression record");
-          free(new_record.data());
+          free(new_data);  // 修复：释放正确的内存
           return RC::NOMEM;
         }
         memcpy(expr_data, record.data(), record.len());
@@ -276,8 +222,8 @@ RC UpdatePhysicalOperator::next()
         rc = expression_->get_value(expr_tuple, expr_value);
         if (rc != RC::SUCCESS) {
           LOG_WARN("failed to get expression value");
-          free(expr_record.data());
-          free(new_record.data());
+          free(expr_data);  // 修复：释放正确的内存
+          free(new_data);   // 修复：释放正确的内存
           return rc;
         }
 
@@ -289,26 +235,26 @@ RC UpdatePhysicalOperator::next()
           if (data_len < static_cast<size_t>(field_meta->len())) {
             copy_len = data_len;
             // 确保字符串以null结尾
-            memset(static_cast<char*>(new_record.data()) + field_meta->offset() + data_len, 0, field_meta->len() - data_len);
+            memset(new_data + field_meta->offset() + data_len, 0, field_meta->len() - data_len);
           } else {
             copy_len = field_meta->len() - 1;  // 保留一个字节给null终止符
             // 确保字符串以null结尾
-            static_cast<char*>(new_record.data())[field_meta->offset() + copy_len] = '\0';
+            new_data[field_meta->offset() + copy_len] = '\0';
           }
           // 直接使用expr_value.data()而不是get_string().c_str()，避免临时对象问题
           const char *src_data = expr_value.data();
           if (src_data != nullptr) {
-            memcpy(static_cast<char*>(new_record.data()) + field_meta->offset(), src_data, copy_len);
+            memcpy(new_data + field_meta->offset(), src_data, copy_len);
           } else {
             // 如果数据为空，填充零
-            memset(static_cast<char*>(new_record.data()) + field_meta->offset(), 0, copy_len);
+            memset(new_data + field_meta->offset(), 0, copy_len);
           }
         } else {
           // 非字符串类型，直接复制数据
-          memcpy(static_cast<char*>(new_record.data()) + field_meta->offset(), expr_value.data(), copy_len);
+          memcpy(new_data + field_meta->offset(), expr_value.data(), copy_len);
         }
 
-        free(expr_record.data());
+        free(expr_data);
       } else {
           // 常量值更新
           // 使用Record的set_field方法更新字段
@@ -320,24 +266,24 @@ RC UpdatePhysicalOperator::next()
           if (src_data == nullptr) {
             LOG_WARN("null data pointer for field %s", attribute_name_);
             // 如果数据为空，填充零
-            memset(static_cast<char*>(new_record.data()) + field_meta->offset(), 0, copy_len);
+            memset(new_data + field_meta->offset(), 0, copy_len);
           } else {
             if (field_meta->type() == AttrType::CHARS) {
               // 修复CHAR类型字符串截断问题
               if (data_len < static_cast<size_t>(field_meta->len())) {
                 copy_len = data_len;
                 // 确保字符串以null结尾
-                memset(static_cast<char*>(new_record.data()) + field_meta->offset() + data_len, 0, field_meta->len() - data_len);
+                memset(new_data + field_meta->offset() + data_len, 0, field_meta->len() - data_len);
               } else {
                 copy_len = field_meta->len() - 1;  // 保留一个字节给null终止符
                 // 确保字符串以null结尾
-                static_cast<char*>(new_record.data())[field_meta->offset() + copy_len] = '\0';
+                new_data[field_meta->offset() + copy_len] = '\0';
               }
               // 直接使用values_[0].data()而不是get_string().c_str()，避免临时对象问题
-              memcpy(static_cast<char*>(new_record.data()) + field_meta->offset(), src_data, copy_len);
+              memcpy(new_data + field_meta->offset(), src_data, copy_len);
             } else {
               // 非字符串类型，直接复制数据
-              memcpy(static_cast<char*>(new_record.data()) + field_meta->offset(), src_data, copy_len);
+              memcpy(new_data + field_meta->offset(), src_data, copy_len);
             }
           }
         }
@@ -346,11 +292,11 @@ RC UpdatePhysicalOperator::next()
         rc = table_->update_record_with_trx(trx, record, new_record);
         if (rc != RC::SUCCESS) {
           LOG_WARN("failed to update record: %s", strrc(rc));
-          free(new_record.data());
+          free(new_data);  // 修复：释放正确的内存
           return rc;
         }
 
-        free(new_record.data());
+        free(new_data);  // 修复：释放正确的内存
     }
   }
 
