@@ -127,15 +127,22 @@ struct DeleteSqlNode
 /**
  * @brief 描述一个update语句
  * @ingroup SQLParser
+ * @details 当前仅支持单表更新，不支持多表。支持多字段更新。
  */
 struct UpdateSqlNode
 {
   string                   relation_name;   ///< Relation to update
-  string                   attribute_name;  ///< 更新的字段，仅支持一个字段
-  Value                    value;           ///< 更新的值，仅支持一个字段
+  string                   attribute_name;  ///< 更新的字段，仅支持一个字段（保留以兼容现有代码）
+  Value                    value;           ///< 更新的值，仅支持一个字段（保留以兼容现有代码）
   vector<ConditionSqlNode> conditions;
   bool                     is_expression = false;  ///< 是否为表达式更新
-  unique_ptr<Expression>   expression;      ///< 表达式更新时的表达式
+  unique_ptr<Expression>   expression;      ///< 表达式更新时的表达式（保留以兼容现有代码）
+  
+  // 多字段更新支持
+  vector<string>           attribute_names; ///< 要更新的多个字段名
+  vector<Value>            values;          ///< 要更新的多个值
+  vector<unique_ptr<Expression>> expressions; ///< 多个表达式更新时的表达式
+  vector<bool>             is_expressions;  ///< 标记每个字段是否为表达式更新
 };
 
 /**

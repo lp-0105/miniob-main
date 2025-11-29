@@ -76,17 +76,36 @@ void LogicalUpdateToUpdate::transform(OperatorNode* input,
 
   unique_ptr<PhysicalOperator> update_phys_oper;
   
-  // 根据是常量值更新还是表达式更新创建不同的UpdatePhysicalOperator
-  if (update_oper->expression() != nullptr) {
-    // 表达式更新
-    unique_ptr<Expression> expression(update_oper->expression()->copy());
-    update_phys_oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
-        update_oper->table(), update_oper->attribute_name(), std::move(expression)));
+  // 检查是否为多字段更新
+  if (update_oper->is_multi_field()) {
+    // 多字段更新
+    if (!update_oper->expressions().empty()) {
+      // 多字段表达式更新
+      std::vector<std::unique_ptr<Expression>> expressions;
+      for (const auto &expr : update_oper->expressions()) {
+        expressions.push_back(expr->copy());
+      }
+      update_phys_oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
+          update_oper->table(), update_oper->attribute_names(), std::move(expressions)));
+    } else {
+      // 多字段常量值更新
+      update_phys_oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
+          update_oper->table(), update_oper->attribute_names(), 
+          update_oper->values_list(), update_oper->value_amounts()));
+    }
   } else {
-    // 常量值更新
-    update_phys_oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
-        update_oper->table(), update_oper->attribute_name(), 
-        update_oper->values(), update_oper->value_amount()));
+    // 单字段更新
+    if (update_oper->expression() != nullptr) {
+      // 表达式更新
+      unique_ptr<Expression> expression(update_oper->expression()->copy());
+      update_phys_oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
+          update_oper->table(), update_oper->attribute_name(), std::move(expression)));
+    } else {
+      // 常量值更新
+      update_phys_oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
+          update_oper->table(), update_oper->attribute_name(), 
+          update_oper->values(), update_oper->value_amount()));
+    }
   }
   
   for (auto &child : update_oper->children()) {

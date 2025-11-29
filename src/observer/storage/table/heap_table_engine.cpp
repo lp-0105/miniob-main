@@ -132,54 +132,49 @@ RC HeapTableEngine::delete_record_with_trx(const Record &record, Trx *trx)
 
 RC HeapTableEngine::update_record_with_trx(Trx *trx, const Record &old_record, const Record &new_record)
 {
-  RC rc = RC::SUCCESS;
-  
-  // 0. 检查记录的并发冲突
-  rc = trx->visit_record(table_, const_cast<Record&>(old_record), ReadWriteMode::READ_WRITE);
+  // 检查记录的并发冲突
+  RC rc = trx->visit_record(table_, const_cast<Record&>(old_record), ReadWriteMode::READ_WRITE);
   if (rc != RC::SUCCESS) {
-    LOG_WARN("Failed to check record visibility. table=%s, rc=%s", table_meta_->name(), strrc(rc));
-    return rc;
+    if (rc == RC::LOCKED_CONCURRENCY_CONFLICT) {
+      LOG_TRACE("record is locked by another transaction, retry later. rid=%s", old_record.rid().to_string().c_str());
+      // 返回一个特殊的错误码，让上层知道需要重试
+      return RC::LOCKED_CONCURRENCY_CONFLICT;
+    } else {
+      LOG_WARN("failed to check record visibility. rc=%s", strrc(rc));
+      return rc;
+    }
   }
-  
-  // 1. 更新记录数据
-  rc = record_handler_->update_record(new_record.data(), new_record.len(), const_cast<RID*>(&new_record.rid()));
+
+  // 更新记录数据
+  rc = record_handler_->update_record(new_record.data(), new_record.len(), &new_record.rid());
   if (rc != RC::SUCCESS) {
-    LOG_ERROR("Failed to update record. table=%s, rc=%s", table_meta_->name(), strrc(rc));
+    LOG_WARN("failed to update record. rc=%s", strrc(rc));
     return rc;
   }
-  
-  // 2. 删除旧记录的索引项
-  rc = delete_entry_of_indexes(old_record.data(), old_record.rid(), false);
-  if (rc != RC::SUCCESS && rc != RC::RECORD_INVALID_KEY) {
-    LOG_ERROR("Failed to delete old index entries. table=%s, rc=%s", table_meta_->name(), strrc(rc));
-    
-    // 回滚：恢复旧记录数据
-    RC rc2 = record_handler_->update_record(old_record.data(), old_record.len(), const_cast<RID*>(&old_record.rid()));
-    if (rc2 != RC::SUCCESS) {
-      LOG_ERROR("Failed to rollback record data. table=%s, rc=%s", table_meta_->name(), strrc(rc2));
+
+  // 更新索引
+  for (Index *index : indexes_) {
+    // 删除旧索引项
+    rc = index->delete_entry(old_record.data(), &old_record.rid());
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to delete index entry. rc=%s", strrc(rc));
+      // 回滚记录更新
+      record_handler_->update_record(old_record.data(), old_record.len(), &old_record.rid());
+      return rc;
     }
-    return rc;
+
+    // 插入新索引项
+    rc = index->insert_entry(new_record.data(), &new_record.rid());
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to insert index entry. rc=%s", strrc(rc));
+      // 回滚：恢复旧索引项和记录
+      index->insert_entry(old_record.data(), &old_record.rid());
+      record_handler_->update_record(old_record.data(), old_record.len(), &old_record.rid());
+      return rc;
+    }
   }
-  
-  // 3. 插入新记录的索引项
-  rc = insert_entry_of_indexes(new_record.data(), new_record.rid());
-  if (rc != RC::SUCCESS) {
-    LOG_ERROR("Failed to insert new index entries. table=%s, rc=%s", table_meta_->name(), strrc(rc));
-    
-    // 回滚：恢复旧记录数据和索引
-    RC rc2 = record_handler_->update_record(old_record.data(), old_record.len(), const_cast<RID*>(&old_record.rid()));
-    if (rc2 != RC::SUCCESS) {
-      LOG_ERROR("Failed to rollback record data. table=%s, rc=%s", table_meta_->name(), strrc(rc2));
-    }
-    
-    rc2 = insert_entry_of_indexes(old_record.data(), old_record.rid());
-    if (rc2 != RC::SUCCESS) {
-      LOG_ERROR("Failed to rollback index entries. table=%s, rc=%s", table_meta_->name(), strrc(rc2));
-    }
-    return rc;
-  }
-  
-  return rc;
+
+  return RC::SUCCESS;
 }
 
 RC HeapTableEngine::get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWriteMode mode)

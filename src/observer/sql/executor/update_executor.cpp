@@ -58,13 +58,6 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
     return RC::INVALID_ARGUMENT;
   }
 
-  const char *attribute_name = update_stmt->attribute_name();
-  const FieldMeta *field_meta = table->table_meta().field(attribute_name);
-  if (nullptr == field_meta) {
-    LOG_WARN("no such field. table=%s, field=%s", table->name(), attribute_name);
-    return RC::SCHEMA_FIELD_NOT_EXIST;
-  }
-
   // 获取事务
   Trx *trx = session_event->session()->current_trx();
   if (nullptr == trx) {
@@ -141,40 +134,6 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
       continue; // 不满足条件，跳过
     }
 
-    // 获取要更新的值
-    Value value;
-    if (update_stmt->expression() != nullptr) {
-      // 表达式更新 - 需要计算表达式值
-      // 创建表达式计算上下文
-      std::vector<unique_ptr<Expression>> expressions;
-      expressions.push_back(unique_ptr<Expression>(update_stmt->expression()->copy()));
-      
-      // 创建元组和计算上下文
-      ProjectTuple project_tuple;
-      project_tuple.set_expressions(std::move(expressions));
-      
-      // 创建记录元组
-      RowTuple row_tuple;
-      const vector<FieldMeta> *fields = table->table_meta().field_metas();
-      row_tuple.set_schema(table, fields);
-      row_tuple.set_record(&record);
-      
-      // 设置计算上下文
-      project_tuple.set_tuple(&row_tuple);
-      
-      // 计算表达式值
-      rc = project_tuple.cell_at(0, value);
-      if (rc != RC::SUCCESS) {
-        LOG_WARN("failed to evaluate expression");
-        scanner->close_scan();
-        delete scanner;
-        return rc;
-      }
-    } else {
-      // 常量值更新
-      value = update_stmt->values()[0];
-    }
-    
     // 创建新的记录
     Record new_record;
     char *new_data = (char*)malloc(record.len());  // 使用malloc而不是new[]
@@ -188,15 +147,192 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
     new_record.set_data_owner(new_data, record.len());
     new_record.set_rid(record.rid());
     
-    // 直接更新新记录中的字段值
-    size_t copy_len = field_meta->len();
-    const size_t data_len = value.length();
-    if (field_meta->type() == AttrType::CHARS) {
-      if (copy_len > data_len) {
-        copy_len = data_len + 1;
+    // 检查是否为多字段更新
+    if (update_stmt->field_count() > 0) {
+      // 多字段更新
+      const vector<string> &attribute_names = update_stmt->attribute_names();
+      const vector<Value> &values_list = update_stmt->values_list();
+      const vector<unique_ptr<Expression>> &expressions_list = update_stmt->expressions_list();
+      
+      // 检查是否为表达式更新
+      bool is_expression_update = !expressions_list.empty();
+      
+      // 逐个更新每个字段
+      for (int i = 0; i < update_stmt->field_count(); i++) {
+        const char *attribute_name = attribute_names[i].c_str();
+        const FieldMeta *field_meta = table->table_meta().field(attribute_name);
+        if (nullptr == field_meta) {
+          LOG_WARN("no such field. table=%s, field=%s", table->name(), attribute_name);
+          scanner->close_scan();
+          delete scanner;
+          return RC::SCHEMA_FIELD_NOT_EXIST;
+        }
+        
+        // 获取要更新的值
+        Value value;
+        if (is_expression_update) {
+          // 表达式更新 - 需要计算表达式值
+          // 在计算表达式前先保存当前记录的数据，避免锁冲突
+          char *record_data_copy = (char*)malloc(record.len());
+          if (nullptr == record_data_copy) {
+            LOG_WARN("failed to allocate memory for record copy");
+            scanner->close_scan();
+            delete scanner;
+            return RC::NOMEM;
+          }
+          memcpy(record_data_copy, record.data(), record.len());
+          
+          // 使用RAII确保内存释放
+          auto record_copy_deleter = [&record_data_copy]() {
+            if (record_data_copy) {
+              free(record_data_copy);
+            }
+          };
+          
+          // 创建记录副本用于表达式计算
+          Record record_copy;
+          record_copy.set_data_owner(record_data_copy, record.len());
+          record_copy.set_rid(record.rid());
+          
+          // 创建表达式计算上下文
+          std::vector<unique_ptr<Expression>> expressions;
+          expressions.push_back(unique_ptr<Expression>(expressions_list[i]->copy()));
+          
+          // 创建元组和计算上下文
+          ProjectTuple project_tuple;
+          project_tuple.set_expressions(std::move(expressions));
+          
+          // 创建记录元组
+          RowTuple row_tuple;
+          const vector<FieldMeta> *fields = table->table_meta().field_metas();
+          row_tuple.set_schema(table, fields);
+          row_tuple.set_record(&record_copy);
+          
+          // 设置计算上下文
+          project_tuple.set_tuple(&row_tuple);
+          
+          // 计算表达式值
+          rc = project_tuple.cell_at(0, value);
+          if (rc != RC::SUCCESS) {
+            LOG_WARN("failed to evaluate expression");
+            record_copy_deleter(); // 释放内存
+            scanner->close_scan();
+            delete scanner;
+            return rc;
+          }
+          
+          // 释放记录副本内存
+          record_copy_deleter();
+        } else {
+          // 常量值更新
+          value = values_list[i];
+        }
+        
+        // 更新新记录中的字段值
+        size_t copy_len = field_meta->len();
+        const size_t data_len = value.length();
+        if (field_meta->type() == AttrType::CHARS) {
+          // 修复CHAR类型字符串截断问题
+          if (data_len < field_meta->len()) {
+            copy_len = data_len;
+            // 确保字符串以null结尾
+            memset(new_data + field_meta->offset() + data_len, 0, field_meta->len() - data_len);
+          } else {
+            copy_len = field_meta->len() - 1;  // 保留一个字节给null终止符
+            // 确保字符串以null结尾
+            new_data[field_meta->offset() + copy_len] = '\0';
+          }
+        }
+        memcpy(new_data + field_meta->offset(), value.data(), copy_len);
       }
+    } else {
+      // 单字段更新（兼容现有代码）
+      const char *attribute_name = update_stmt->attribute_name();
+      const FieldMeta *field_meta = table->table_meta().field(attribute_name);
+      if (nullptr == field_meta) {
+        LOG_WARN("no such field. table=%s, field=%s", table->name(), attribute_name);
+        scanner->close_scan();
+        delete scanner;
+        return RC::SCHEMA_FIELD_NOT_EXIST;
+      }
+      
+      // 获取要更新的值
+      Value value;
+      if (update_stmt->expression() != nullptr) {
+        // 表达式更新 - 需要计算表达式值
+        // 在计算表达式前先保存当前记录的数据，避免锁冲突
+        char *record_data_copy = (char*)malloc(record.len());
+        if (nullptr == record_data_copy) {
+          LOG_WARN("failed to allocate memory for record copy");
+          scanner->close_scan();
+          delete scanner;
+          return RC::NOMEM;
+        }
+        memcpy(record_data_copy, record.data(), record.len());
+        
+        // 使用RAII确保内存释放
+        auto record_copy_deleter = [&record_data_copy]() {
+          if (record_data_copy) {
+            free(record_data_copy);
+          }
+        };
+        
+        // 创建记录副本用于表达式计算
+        Record record_copy;
+        record_copy.set_data_owner(record_data_copy, record.len());
+        record_copy.set_rid(record.rid());
+        
+        // 创建表达式计算上下文
+        std::vector<unique_ptr<Expression>> expressions;
+        expressions.push_back(unique_ptr<Expression>(update_stmt->expression()->copy()));
+        
+        // 创建元组和计算上下文
+        ProjectTuple project_tuple;
+        project_tuple.set_expressions(std::move(expressions));
+        
+        // 创建记录元组
+        RowTuple row_tuple;
+        const vector<FieldMeta> *fields = table->table_meta().field_metas();
+        row_tuple.set_schema(table, fields);
+        row_tuple.set_record(&record_copy);
+        
+        // 设置计算上下文
+        project_tuple.set_tuple(&row_tuple);
+        
+        // 计算表达式值
+        rc = project_tuple.cell_at(0, value);
+        if (rc != RC::SUCCESS) {
+          LOG_WARN("failed to evaluate expression");
+          record_copy_deleter(); // 释放内存
+          scanner->close_scan();
+          delete scanner;
+          return rc;
+        }
+        
+        // 释放记录副本内存
+        record_copy_deleter();
+      } else {
+        // 常量值更新
+        value = update_stmt->values()[0];
+      }
+      
+      // 更新新记录中的字段值
+      size_t copy_len = field_meta->len();
+      const size_t data_len = value.length();
+      if (field_meta->type() == AttrType::CHARS) {
+        // 修复CHAR类型字符串截断问题
+        if (data_len < field_meta->len()) {
+          copy_len = data_len;
+          // 确保字符串以null结尾
+          memset(new_data + field_meta->offset() + data_len, 0, field_meta->len() - data_len);
+        } else {
+          copy_len = field_meta->len() - 1;  // 保留一个字节给null终止符
+          // 确保字符串以null结尾
+          new_data[field_meta->offset() + copy_len] = '\0';
+        }
+      }
+      memcpy(new_data + field_meta->offset(), value.data(), copy_len);
     }
-    memcpy(new_data + field_meta->offset(), value.data(), copy_len);
     
     // 使用update_record_with_trx方法更新记录
     rc = table->update_record_with_trx(trx, record, new_record);

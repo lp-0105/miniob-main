@@ -381,15 +381,40 @@ RC LogicalPlanGenerator::create_plan(UpdateStmt *update_stmt, unique_ptr<Logical
 
   unique_ptr<LogicalOperator> update_oper;
   
-  // 根据是常量值更新还是表达式更新创建不同的UpdateLogicalOperator
-  if (update_stmt->expression() != nullptr) {
-    // 表达式更新
-    unique_ptr<Expression> expression(update_stmt->expression()->copy());
-    update_oper = unique_ptr<LogicalOperator>(new UpdateLogicalOperator(table, update_stmt->attribute_name(), std::move(expression)));
+  // 检查是否为多字段更新
+  if (update_stmt->field_count() > 1) {
+    // 多字段更新
+    if (update_stmt->expression() != nullptr) {
+      // 表达式多字段更新
+      vector<unique_ptr<Expression>> expressions;
+      for (size_t i = 0; i < update_stmt->field_count(); i++) {
+        expressions.push_back(unique_ptr<Expression>(update_stmt->expressions_list()[i]->copy()));
+      }
+      update_oper = unique_ptr<LogicalOperator>(new UpdateLogicalOperator(table, update_stmt->attribute_names(), std::move(expressions)));
+    } else {
+      // 常量值多字段更新
+      // 需要将vector<Value>转换为vector<Value*>和vector<int>
+      vector<Value*> values_list;
+      vector<int> value_amounts;
+      const vector<Value>& values = update_stmt->values_list();
+      for (const auto& value : values) {
+        values_list.push_back(const_cast<Value*>(&value));
+        value_amounts.push_back(1); // 每个字段一个值
+      }
+      update_oper = unique_ptr<LogicalOperator>(new UpdateLogicalOperator(table, update_stmt->attribute_names(), 
+                                                                          values_list, value_amounts));
+    }
   } else {
-    // 常量值更新
-    update_oper = unique_ptr<LogicalOperator>(new UpdateLogicalOperator(table, update_stmt->attribute_name(), 
-                                                                        update_stmt->values(), update_stmt->value_amount()));
+    // 单字段更新（保持向后兼容）
+    if (update_stmt->expression() != nullptr) {
+      // 表达式更新
+      unique_ptr<Expression> expression(update_stmt->expression()->copy());
+      update_oper = unique_ptr<LogicalOperator>(new UpdateLogicalOperator(table, update_stmt->attribute_name(), std::move(expression)));
+    } else {
+      // 常量值更新
+      update_oper = unique_ptr<LogicalOperator>(new UpdateLogicalOperator(table, update_stmt->attribute_name(), 
+                                                                          update_stmt->values(), update_stmt->value_amount()));
+    }
   }
 
   if (predicate_oper) {
