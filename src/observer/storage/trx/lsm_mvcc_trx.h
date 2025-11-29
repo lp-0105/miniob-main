@@ -66,8 +66,19 @@ public:
   int32_t id() const override { return 0; }
 
 private:
+  RC check_intra_transaction_lock(PageNum page_num, ReadWriteMode mode);
+  void record_intra_transaction_lock(PageNum page_num, ReadWriteMode mode);
+
+private:
   ObLsm            *lsm_;
   ObLsmTransaction *trx_ = nullptr;
+  
+  struct LockInfo {
+    ReadWriteMode mode;
+  };
+  
+  std::unordered_map<PageNum, LockInfo> intra_transaction_locks_;
+  common::Mutex lock_mutex_;
 };
 
 class LsmMvccTrxLogReplayer : public LogReplayer

@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/index/bplus_tree_index.h"
 #include "storage/common/meta_util.h"
 #include "storage/db/db.h"
+#include <unistd.h>
 
 
 HeapTableEngine::~HeapTableEngine()
@@ -132,18 +133,34 @@ RC HeapTableEngine::delete_record_with_trx(const Record &record, Trx *trx)
 
 RC HeapTableEngine::update_record_with_trx(Trx *trx, const Record &old_record, const Record &new_record)
 {
-  // 检查记录的并发冲突
-  RC rc = trx->visit_record(table_, const_cast<Record&>(old_record), ReadWriteMode::READ_WRITE);
-  if (rc != RC::SUCCESS) {
+  RC rc = RC::SUCCESS;
+  
+  // 检查记录可见性并获取锁
+  int retry_count = 0;
+  const int max_retry_count = 3;
+  
+  do {
+    // 使用READ_ONLY模式检查记录可见性，避免在已经持有写锁的情况下再次请求写锁
+    rc = trx->visit_record(table_, const_cast<Record&>(old_record), ReadWriteMode::READ_ONLY);
     if (rc == RC::LOCKED_CONCURRENCY_CONFLICT) {
-      LOG_TRACE("record is locked by another transaction, retry later. rid=%s", old_record.rid().to_string().c_str());
-      // 返回一个特殊的错误码，让上层知道需要重试
-      return RC::LOCKED_CONCURRENCY_CONFLICT;
-    } else {
+      LOG_TRACE("record is locked by another transaction, retrying... rid=%s, retry_count=%d", 
+                old_record.rid().to_string().c_str(), retry_count);
+      
+      // 简单的退避策略：等待一段时间后重试
+      if (retry_count < max_retry_count) {
+        usleep(1000); // 等待1ms
+        retry_count++;
+        continue;
+      } else {
+        LOG_WARN("max retry count reached for record update. rid=%s", old_record.rid().to_string().c_str());
+        return RC::LOCKED_CONCURRENCY_CONFLICT;
+      }
+    } else if (rc != RC::SUCCESS) {
       LOG_WARN("failed to check record visibility. rc=%s", strrc(rc));
       return rc;
     }
-  }
+    break;
+  } while (retry_count < max_retry_count);
 
   // 更新记录数据
   rc = record_handler_->update_record(new_record.data(), new_record.len(), &new_record.rid());
