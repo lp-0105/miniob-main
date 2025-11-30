@@ -182,14 +182,8 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
           }
           memcpy(record_data_copy, record.data(), record.len());
           
-          // 使用RAII确保内存释放
-          auto record_copy_deleter = [&record_data_copy]() {
-            if (record_data_copy) {
-              free(record_data_copy);
-            }
-          };
-          
           // 创建记录副本用于表达式计算
+          // Record will take ownership of record_data_copy and free it in destructor
           Record record_copy;
           record_copy.set_data_owner(record_data_copy, record.len());
           record_copy.set_rid(record.rid());
@@ -215,14 +209,10 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
           rc = project_tuple.cell_at(0, value);
           if (rc != RC::SUCCESS) {
             LOG_WARN("failed to evaluate expression");
-            record_copy_deleter(); // 释放内存
             scanner->close_scan();
             delete scanner;
             return rc;
           }
-          
-          // 释放记录副本内存
-          record_copy_deleter();
         } else {
           // 常量值更新
           value = values_list[i];
@@ -270,14 +260,8 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
         }
         memcpy(record_data_copy, record.data(), record.len());
         
-        // 使用RAII确保内存释放
-        auto record_copy_deleter = [&record_data_copy]() {
-          if (record_data_copy) {
-            free(record_data_copy);
-          }
-        };
-        
         // 创建记录副本用于表达式计算
+        // Record will take ownership of record_data_copy and free it in destructor
         Record record_copy;
         record_copy.set_data_owner(record_data_copy, record.len());
         record_copy.set_rid(record.rid());
@@ -303,14 +287,10 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
         rc = project_tuple.cell_at(0, value);
         if (rc != RC::SUCCESS) {
           LOG_WARN("failed to evaluate expression");
-          record_copy_deleter(); // 释放内存
           scanner->close_scan();
           delete scanner;
           return rc;
         }
-        
-        // 释放记录副本内存
-        record_copy_deleter();
       } else {
         // 常量值更新
         value = update_stmt->values()[0];

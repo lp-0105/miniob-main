@@ -162,6 +162,16 @@ RC HeapTableEngine::update_record_with_trx(Trx *trx, const Record &old_record, c
     break;
   } while (retry_count < max_retry_count);
 
+  // Deep copy old_record to avoid aliasing issues
+  // old_record.data() might point to the page memory which will be modified by record_handler_->update_record
+  Record old_record_copy;
+  rc = old_record_copy.copy_data(old_record.data(), old_record.len());
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to copy old record data. rc=%s", strrc(rc));
+    return rc;
+  }
+  old_record_copy.set_rid(old_record.rid());
+
   // 更新记录数据
   rc = record_handler_->update_record(new_record.data(), new_record.len(), &new_record.rid());
   if (rc != RC::SUCCESS) {
@@ -172,14 +182,14 @@ RC HeapTableEngine::update_record_with_trx(Trx *trx, const Record &old_record, c
   // 更新索引
   for (Index *index : indexes_) {
     // 删除旧索引项
-    rc = index->delete_entry(old_record.data(), &old_record.rid());
+    rc = index->delete_entry(old_record_copy.data(), &old_record_copy.rid());
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to delete index entry. rc=%s, index=%s, rid=%s", 
-               strrc(rc), index->index_meta().name(), old_record.rid().to_string().c_str());
+               strrc(rc), index->index_meta().name(), old_record_copy.rid().to_string().c_str());
       // 回滚记录更新
-      RC rc2 = record_handler_->update_record(old_record.data(), old_record.len(), &old_record.rid());
+      RC rc2 = record_handler_->update_record(old_record_copy.data(), old_record_copy.len(), &old_record_copy.rid());
       if (rc2 != RC::SUCCESS) {
-        LOG_ERROR("failed to rollback record update. rc=%s, rid=%s", strrc(rc2), old_record.rid().to_string().c_str());
+        LOG_ERROR("failed to rollback record update. rc=%s, rid=%s", strrc(rc2), old_record_copy.rid().to_string().c_str());
       }
       return rc;
     }
@@ -190,15 +200,15 @@ RC HeapTableEngine::update_record_with_trx(Trx *trx, const Record &old_record, c
       LOG_WARN("failed to insert index entry. rc=%s, index=%s, rid=%s", 
                strrc(rc), index->index_meta().name(), new_record.rid().to_string().c_str());
       // 回滚：恢复旧索引项和记录
-      RC rc2 = index->insert_entry(old_record.data(), &old_record.rid());
+      RC rc2 = index->insert_entry(old_record_copy.data(), &old_record_copy.rid());
       if (rc2 != RC::SUCCESS) {
         LOG_ERROR("failed to rollback index deletion. rc=%s, index=%s, rid=%s", 
-                  strrc(rc2), index->index_meta().name(), old_record.rid().to_string().c_str());
+                  strrc(rc2), index->index_meta().name(), old_record_copy.rid().to_string().c_str());
       }
       
-      RC rc3 = record_handler_->update_record(old_record.data(), old_record.len(), &old_record.rid());
+      RC rc3 = record_handler_->update_record(old_record_copy.data(), old_record_copy.len(), &old_record_copy.rid());
       if (rc3 != RC::SUCCESS) {
-        LOG_ERROR("failed to rollback record update. rc=%s, rid=%s", strrc(rc3), old_record.rid().to_string().c_str());
+        LOG_ERROR("failed to rollback record update. rc=%s, rid=%s", strrc(rc3), old_record_copy.rid().to_string().c_str());
       }
       return rc;
     }
