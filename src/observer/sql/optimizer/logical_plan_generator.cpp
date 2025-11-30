@@ -26,6 +26,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/project_logical_operator.h"
 #include "sql/operator/table_get_logical_operator.h"
 #include "sql/operator/group_by_logical_operator.h"
+#include "sql/operator/update_logical_operator.h"
 
 #include "sql/stmt/calc_stmt.h"
 #include "sql/stmt/delete_stmt.h"
@@ -33,6 +34,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/filter_stmt.h"
 #include "sql/stmt/insert_stmt.h"
 #include "sql/stmt/select_stmt.h"
+#include "sql/stmt/update_stmt.h"
 #include "sql/stmt/stmt.h"
 
 #include "sql/expr/expression_iterator.h"
@@ -60,6 +62,12 @@ RC LogicalPlanGenerator::create(Stmt *stmt, unique_ptr<LogicalOperator> &logical
       InsertStmt *insert_stmt = static_cast<InsertStmt *>(stmt);
 
       rc = create_plan(insert_stmt, logical_operator);
+    } break;
+
+    case StmtType::UPDATE: {
+      UpdateStmt *update_stmt = static_cast<UpdateStmt *>(stmt);
+
+      rc = create_plan(update_stmt, logical_operator);
     } break;
 
     case StmtType::DELETE: {
@@ -356,4 +364,66 @@ RC LogicalPlanGenerator::create_group_by_plan(SelectStmt *select_stmt, unique_pt
                                                            std::move(aggregate_expressions));
   logical_operator = std::move(group_by_oper);
   return RC::SUCCESS;
+}
+
+RC LogicalPlanGenerator::create_plan(UpdateStmt *update_stmt, unique_ptr<LogicalOperator> &logical_operator)
+{
+  Table                      *table       = update_stmt->table();
+  FilterStmt                 *filter_stmt = update_stmt->filter_stmt();
+  unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_WRITE));
+
+  unique_ptr<LogicalOperator> predicate_oper;
+
+  RC rc = create_plan(filter_stmt, predicate_oper);
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+
+  unique_ptr<LogicalOperator> update_oper;
+  
+  // 检查是否为多字段更新
+  if (update_stmt->field_count() > 1) {
+    // 多字段更新
+    if (update_stmt->expression() != nullptr) {
+      // 表达式多字段更新
+      vector<unique_ptr<Expression>> expressions;
+      for (size_t i = 0; i < update_stmt->field_count(); i++) {
+        expressions.push_back(unique_ptr<Expression>(update_stmt->expressions_list()[i]->copy()));
+      }
+      update_oper = unique_ptr<LogicalOperator>(new UpdateLogicalOperator(table, update_stmt->attribute_names(), std::move(expressions)));
+    } else {
+      // 常量值多字段更新
+      // 需要将vector<Value>转换为vector<Value*>和vector<int>
+      vector<Value*> values_list;
+      vector<int> value_amounts;
+      const vector<Value>& values = update_stmt->values_list();
+      for (const auto& value : values) {
+        values_list.push_back(const_cast<Value*>(&value));
+        value_amounts.push_back(1); // 每个字段一个值
+      }
+      update_oper = unique_ptr<LogicalOperator>(new UpdateLogicalOperator(table, update_stmt->attribute_names(), 
+                                                                          values_list, value_amounts));
+    }
+  } else {
+    // 单字段更新（保持向后兼容）
+    if (update_stmt->expression() != nullptr) {
+      // 表达式更新
+      unique_ptr<Expression> expression(update_stmt->expression()->copy());
+      update_oper = unique_ptr<LogicalOperator>(new UpdateLogicalOperator(table, update_stmt->attribute_name(), std::move(expression)));
+    } else {
+      // 常量值更新
+      update_oper = unique_ptr<LogicalOperator>(new UpdateLogicalOperator(table, update_stmt->attribute_name(), 
+                                                                          update_stmt->values(), update_stmt->value_amount()));
+    }
+  }
+
+  if (predicate_oper) {
+    predicate_oper->add_child(std::move(table_get_oper));
+    update_oper->add_child(std::move(predicate_oper));
+  } else {
+    update_oper->add_child(std::move(table_get_oper));
+  }
+
+  logical_operator = std::move(update_oper);
+  return rc;
 }

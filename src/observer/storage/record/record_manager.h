@@ -334,6 +334,8 @@ public:
 
   virtual RC delete_record(const RID *rid) override;
 
+  virtual RC update_record(const RID &rid, const char *data) override;
+
   /**
    * @brief 获取指定位置的记录数据
    *
@@ -410,6 +412,15 @@ public:
   RC get_record(const RID &rid, Record &record);
 
   RC visit_record(const RID &rid, function<bool(Record &)> updater);
+
+  /**
+   * @brief 更新指定位置的记录
+   *
+   * @param rid 待更新记录的标识符
+   * @param data 新的记录数据
+   * @param len 记录数据长度
+   */
+  RC update_record(const char *data, int len, const RID *rid);
 
 private:
   /**

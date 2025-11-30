@@ -461,6 +461,52 @@ RC PaxRecordPageHandler::delete_record(const RID *rid)
   }
 }
 
+RC PaxRecordPageHandler::update_record(const RID &rid, const char *data)
+{
+  ASSERT(rw_mode_ != ReadWriteMode::READ_ONLY, 
+         "cannot update record from page while the page is readonly");
+
+  if (rid.slot_num >= page_header_->record_capacity) {
+    LOG_ERROR("Invalid slot_num %d, exceed page's record capacity, frame=%s, page_header=%s",
+              rid.slot_num, frame_->to_string().c_str(), page_header_->to_string().c_str());
+    return RC::INVALID_ARGUMENT;
+  }
+
+  Bitmap bitmap(bitmap_, page_header_->record_capacity);
+  if (!bitmap.get_bit(rid.slot_num)) {
+    LOG_DEBUG("Invalid slot_num %d, slot is empty, page_num %d.", rid.slot_num, frame_->page_num());
+    return RC::RECORD_NOT_EXIST;
+  }
+
+  frame_->mark_dirty();
+
+  // For Pax storage format, we need to update each field separately
+  // Get column index from page header
+  int column_num = page_header_->column_num;
+  if (column_num <= 0) {
+    LOG_ERROR("Invalid column count %d for Pax update", column_num);
+    return RC::INTERNAL;
+  }
+
+  // Calculate the offset for each field and update them
+  int data_offset = 0;
+  for (int i = 0; i < column_num; i++) {
+    int field_len = get_field_len(i);
+    char *field_data = get_field_data(rid.slot_num, i);
+    memcpy(field_data, data + data_offset, field_len);
+    data_offset += field_len;
+  }
+
+  RC rc = log_handler_.update_record(frame_, rid, data);
+  if (OB_FAIL(rc)) {
+    LOG_ERROR("Failed to update record. page_num %d:%d. rc=%s", 
+              disk_buffer_pool_->file_desc(), frame_->page_num(), strrc(rc));
+    // return rc; // ignore errors
+  }
+
+  return RC::SUCCESS;
+}
+
 RC PaxRecordPageHandler::get_record(const RID &rid, Record &record)
 {
   // your code here
@@ -729,6 +775,27 @@ RC RecordFileHandler::visit_record(const RID &rid, function<bool(Record &)> upda
   if (updated) {
     rc = page_handler->update_record(rid, record.data());
   }
+  return rc;
+}
+
+RC RecordFileHandler::update_record(const char *data, int len, const RID *rid)
+{
+  RC rc = RC::SUCCESS;
+
+  unique_ptr<RecordPageHandler> record_page_handler(RecordPageHandler::create(storage_format_));
+
+  rc = record_page_handler->init(*disk_buffer_pool_, *log_handler_, rid->page_num, ReadWriteMode::READ_WRITE);
+  if (OB_FAIL(rc)) {
+    LOG_ERROR("Failed to init record page handler.page number=%d. rc=%s", rid->page_num, strrc(rc));
+    return rc;
+  }
+
+  rc = record_page_handler->update_record(*rid, data);
+  if (OB_FAIL(rc)) {
+    LOG_ERROR("Failed to update record. rid=%s, rc=%s", rid->to_string().c_str(), strrc(rc));
+    return rc;
+  }
+
   return rc;
 }
 

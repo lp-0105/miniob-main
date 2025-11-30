@@ -22,6 +22,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/calc_physical_operator.h"
 #include "sql/operator/delete_logical_operator.h"
 #include "sql/operator/delete_physical_operator.h"
+#include "sql/operator/update_logical_operator.h"
+#include "sql/operator/update_physical_operator.h"
 #include "sql/operator/predicate_logical_operator.h"
 #include "sql/operator/predicate_physical_operator.h"
 #include "sql/operator/group_by_logical_operator.h"
@@ -53,6 +55,64 @@ void LogicalGetToPhysicalSeqScan::transform(OperatorNode* input,
   auto oper = unique_ptr<OperatorNode>(table_scan_oper);
 
   transformed->emplace_back(std::move(oper));
+}
+
+// -------------------------------------------------------------------------------------------------
+// Physical Update
+// -------------------------------------------------------------------------------------------------
+LogicalUpdateToUpdate::LogicalUpdateToUpdate()
+{
+  type_ = RuleType::UPDATE_TO_PHYSICAL;
+  match_pattern_ = unique_ptr<Pattern>(new Pattern(OpType::LOGICALUPDATE));
+  auto child = new Pattern(OpType::LEAF);
+  match_pattern_->add_child(child);
+}
+
+void LogicalUpdateToUpdate::transform(OperatorNode* input,
+                         std::vector<std::unique_ptr<OperatorNode>> *transformed,
+                         OptimizerContext *context) const
+{
+  auto update_oper = dynamic_cast<UpdateLogicalOperator*>(input);
+
+  unique_ptr<PhysicalOperator> update_phys_oper;
+  
+  // 检查是否为多字段更新
+  if (update_oper->is_multi_field()) {
+    // 多字段更新
+    if (!update_oper->expressions().empty()) {
+      // 多字段表达式更新
+      std::vector<std::unique_ptr<Expression>> expressions;
+      for (const auto &expr : update_oper->expressions()) {
+        expressions.push_back(expr->copy());
+      }
+      update_phys_oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
+          update_oper->table(), update_oper->attribute_names(), std::move(expressions)));
+    } else {
+      // 多字段常量值更新
+      update_phys_oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
+          update_oper->table(), update_oper->attribute_names(), 
+          update_oper->values_list(), update_oper->value_amounts()));
+    }
+  } else {
+    // 单字段更新
+    if (update_oper->expression() != nullptr) {
+      // 表达式更新
+      unique_ptr<Expression> expression(update_oper->expression()->copy());
+      update_phys_oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
+          update_oper->table(), update_oper->attribute_name(), std::move(expression)));
+    } else {
+      // 常量值更新
+      update_phys_oper = unique_ptr<PhysicalOperator>(new UpdatePhysicalOperator(
+          update_oper->table(), update_oper->attribute_name(), 
+          update_oper->values(), update_oper->value_amount()));
+    }
+  }
+  
+  for (auto &child : update_oper->children()) {
+    update_phys_oper->add_general_child(child.get());
+  }
+
+  transformed->emplace_back(std::move(update_phys_oper));
 }
 
 // -------------------------------------------------------------------------------------------------

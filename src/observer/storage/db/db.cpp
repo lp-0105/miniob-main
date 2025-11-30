@@ -16,6 +16,8 @@ See the Mulan PSL v2 for more details. */
 
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <filesystem>
+#include <cstdio>
 
 #include "common/lang/string.h"
 #include "common/log/log.h"
@@ -415,3 +417,68 @@ RC Db::init_dblwr_buffer()
 LogHandler        &Db::log_handler() { return *log_handler_; }
 BufferPoolManager &Db::buffer_pool_manager() { return *buffer_pool_manager_; }
 TrxKit            &Db::trx_kit() { return *trx_kit_; }
+
+RC Db::drop_table(const char *table_name)
+{
+  if (table_name == nullptr || strlen(table_name) == 0) {
+    LOG_ERROR("Invalid table name. table_name=%p", table_name);
+    return RC::INVALID_ARGUMENT;
+  }
+
+  // 查找表是否存在
+  auto iter = opened_tables_.find(table_name);
+  if (iter == opened_tables_.end()) {
+    LOG_WARN("Table not found. table_name=%s", table_name);
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+
+  Table *table = iter->second;
+  
+  // 同步表数据到磁盘
+  RC rc = table->sync();
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to sync table before dropping. table_name=%s, rc=%d:%s", 
+              table_name, rc, strrc(rc));
+    return rc;
+  }
+
+  // 删除所有索引文件
+  const TableMeta &table_meta = table->table_meta();
+  const int index_num = table_meta.index_num();
+  for (int i = 0; i < index_num; i++) {
+    const IndexMeta *index_meta = table_meta.index(i);
+    string index_file_path = table_index_file(path_.c_str(), table_name, index_meta->name());
+    
+    if (filesystem::exists(index_file_path) && remove(index_file_path.c_str()) != 0) {
+      LOG_ERROR("Failed to remove index file. file=%s, errno=%s", 
+                index_file_path.c_str(), strerror(errno));
+      // 继续尝试删除其他索引文件
+    }
+  }
+  
+  // 从内存中删除表对象
+  opened_tables_.erase(iter);
+  
+  // 删除表文件
+  string table_meta_file_path = table_meta_file(path_.c_str(), table_name);
+  string table_data_file_path = table_data_file(path_.c_str(), table_name);
+  
+  // 删除表元数据文件
+  if (filesystem::exists(table_meta_file_path) && remove(table_meta_file_path.c_str()) != 0) {
+    LOG_ERROR("Failed to remove table meta file. file=%s, errno=%s", 
+              table_meta_file_path.c_str(), strerror(errno));
+    // 继续尝试删除数据文件
+  }
+  
+  // 删除表数据文件
+  if (filesystem::exists(table_data_file_path) && remove(table_data_file_path.c_str()) != 0) {
+    LOG_ERROR("Failed to remove table data file. file=%s, errno=%s", 
+              table_data_file_path.c_str(), strerror(errno));
+  }
+  
+  // 释放表对象内存
+  delete table;
+  
+  LOG_INFO("Successfully dropped table. table_name=%s", table_name);
+  return RC::SUCCESS;
+}

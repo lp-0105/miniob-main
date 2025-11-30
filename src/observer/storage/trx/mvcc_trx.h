@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 #pragma once
 
 #include "common/lang/vector.h"
+#include "common/lang/unordered_map.h"
 #include "storage/trx/trx.h"
 #include "storage/trx/mvcc_trx_log.h"
 
@@ -98,6 +99,22 @@ public:
 private:
   RC   commit_with_trx_id(int32_t commit_id);
   void trx_fields(Table *table, Field &begin_xid_field, Field &end_xid_field) const;
+  
+  /**
+   * @brief 检查同一事务内的锁升级/降级
+   * @param page_num 页面号
+   * @param mode 当前请求的锁模式
+   * @return RC - SUCCESS 可以获取锁
+   *           - LOCKED_CONCURRENCY_CONFLICT 锁冲突
+   */
+  RC check_intra_transaction_lock(PageNum page_num, ReadWriteMode mode);
+  
+  /**
+   * @brief 记录事务内已获取的锁
+   * @param page_num 页面号
+   * @param mode 锁模式
+   */
+  void record_intra_transaction_lock(PageNum page_num, ReadWriteMode mode);
 
 private:
   static const int32_t MAX_TRX_ID = numeric_limits<int32_t>::max();
@@ -105,6 +122,12 @@ private:
 private:
   // using OperationSet = unordered_set<Operation, OperationHasher, OperationEqualer>;
   using OperationSet = vector<Operation>;
+  
+  // 同一事务内已获取的锁信息
+  struct LockInfo {
+    ReadWriteMode mode;
+  };
+  using LockMap = unordered_map<PageNum, LockInfo>;
 
   MvccTrxKit       &trx_kit_;
   MvccTrxLogHandler log_handler_;
@@ -112,4 +135,6 @@ private:
   bool              started_    = false;
   bool              recovering_ = false;
   OperationSet      operations_;
+  LockMap           intra_transaction_locks_;  // 同一事务内已获取的锁
+  common::Mutex     lock_mutex_;               // 保护intra_transaction_locks_的互斥锁
 };

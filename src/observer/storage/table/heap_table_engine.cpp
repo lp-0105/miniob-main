@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/index/bplus_tree_index.h"
 #include "storage/common/meta_util.h"
 #include "storage/db/db.h"
+#include <unistd.h>
 
 
 HeapTableEngine::~HeapTableEngine()
@@ -101,6 +102,120 @@ RC HeapTableEngine::delete_record(const Record &record)
   }
   rc = record_handler_->delete_record(&record.rid());
   return rc;
+}
+
+RC HeapTableEngine::delete_record_with_trx(const Record &record, Trx *trx)
+{
+  RC rc = RC::SUCCESS;
+  
+  // 1. 删除记录的索引项
+  rc = delete_entry_of_indexes(record.data(), record.rid(), true);
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to delete index entries. table=%s, rc=%s", table_meta_->name(), strrc(rc));
+    return rc;
+  }
+  
+  // 2. 删除记录数据
+  rc = record_handler_->delete_record(&record.rid());
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to delete record. table=%s, rc=%s", table_meta_->name(), strrc(rc));
+    
+    // 回滚：重新插入记录的索引项
+    RC rc2 = insert_entry_of_indexes(record.data(), record.rid());
+    if (rc2 != RC::SUCCESS) {
+      LOG_ERROR("Failed to rollback index entries. table=%s, rc=%s", table_meta_->name(), strrc(rc2));
+    }
+    return rc;
+  }
+  
+  return rc;
+}
+
+RC HeapTableEngine::update_record_with_trx(Trx *trx, const Record &old_record, const Record &new_record)
+{
+  RC rc = RC::SUCCESS;
+  
+  // 检查记录可见性并获取锁
+  int retry_count = 0;
+  const int max_retry_count = 3;
+  
+  do {
+    // 使用READ_ONLY模式检查记录可见性，避免在已经持有写锁的情况下再次请求写锁
+    rc = trx->visit_record(table_, const_cast<Record&>(old_record), ReadWriteMode::READ_ONLY);
+    if (rc == RC::LOCKED_CONCURRENCY_CONFLICT) {
+      LOG_TRACE("record is locked by another transaction, retrying... rid=%s, retry_count=%d", 
+                old_record.rid().to_string().c_str(), retry_count);
+      
+      // 简单的退避策略：等待一段时间后重试
+      if (retry_count < max_retry_count) {
+        usleep(1000); // 等待1ms
+        retry_count++;
+        continue;
+      } else {
+        LOG_WARN("max retry count reached for record update. rid=%s", old_record.rid().to_string().c_str());
+        return RC::LOCKED_CONCURRENCY_CONFLICT;
+      }
+    } else if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to check record visibility. rc=%s", strrc(rc));
+      return rc;
+    }
+    break;
+  } while (retry_count < max_retry_count);
+
+  // Deep copy old_record to avoid aliasing issues
+  // old_record.data() might point to the page memory which will be modified by record_handler_->update_record
+  Record old_record_copy;
+  rc = old_record_copy.copy_data(old_record.data(), old_record.len());
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to copy old record data. rc=%s", strrc(rc));
+    return rc;
+  }
+  old_record_copy.set_rid(old_record.rid());
+
+  // 更新记录数据
+  rc = record_handler_->update_record(new_record.data(), new_record.len(), &new_record.rid());
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("failed to update record. rc=%s, rid=%s", strrc(rc), new_record.rid().to_string().c_str());
+    return rc;
+  }
+
+  // 更新索引
+  for (Index *index : indexes_) {
+    // 删除旧索引项
+    rc = index->delete_entry(old_record_copy.data(), &old_record_copy.rid());
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to delete index entry. rc=%s, index=%s, rid=%s", 
+               strrc(rc), index->index_meta().name(), old_record_copy.rid().to_string().c_str());
+      // 回滚记录更新
+      RC rc2 = record_handler_->update_record(old_record_copy.data(), old_record_copy.len(), &old_record_copy.rid());
+      if (rc2 != RC::SUCCESS) {
+        LOG_ERROR("failed to rollback record update. rc=%s, rid=%s", strrc(rc2), old_record_copy.rid().to_string().c_str());
+      }
+      return rc;
+    }
+
+    // 插入新索引项
+    rc = index->insert_entry(new_record.data(), &new_record.rid());
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to insert index entry. rc=%s, index=%s, rid=%s", 
+               strrc(rc), index->index_meta().name(), new_record.rid().to_string().c_str());
+      // 回滚：恢复旧索引项和记录
+      RC rc2 = index->insert_entry(old_record_copy.data(), &old_record_copy.rid());
+      if (rc2 != RC::SUCCESS) {
+        LOG_ERROR("failed to rollback index deletion. rc=%s, index=%s, rid=%s", 
+                  strrc(rc2), index->index_meta().name(), old_record_copy.rid().to_string().c_str());
+      }
+      
+      RC rc3 = record_handler_->update_record(old_record_copy.data(), old_record_copy.len(), &old_record_copy.rid());
+      if (rc3 != RC::SUCCESS) {
+        LOG_ERROR("failed to rollback record update. rc=%s, rid=%s", strrc(rc3), old_record_copy.rid().to_string().c_str());
+      }
+      return rc;
+    }
+  }
+
+  LOG_TRACE("successfully updated record and indexes. rid=%s", new_record.rid().to_string().c_str());
+  return RC::SUCCESS;
 }
 
 RC HeapTableEngine::get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWriteMode mode)
@@ -239,8 +354,20 @@ RC HeapTableEngine::delete_entry_of_indexes(const char *record, const RID &rid, 
   for (Index *index : indexes_) {
     rc = index->delete_entry(record, &rid);
     if (rc != RC::SUCCESS) {
-      if (rc != RC::RECORD_INVALID_KEY || !error_on_not_exists) {
+      // 允许RECORD_NOT_EXIST和RECORD_INVALID_KEY错误，因为索引项可能已经被删除
+      if (rc != RC::RECORD_INVALID_KEY && rc != RC::RECORD_NOT_EXIST) {
+        LOG_ERROR("Failed to delete index entry. table=%s, index=%s, rc=%s",
+                  table_meta_->name(), index->index_meta().name(), strrc(rc));
         break;
+      } else if (rc == RC::RECORD_NOT_EXIST && error_on_not_exists) {
+        LOG_WARN("Index entry does not exist. table=%s, index=%s",
+                 table_meta_->name(), index->index_meta().name());
+        break;
+      } else {
+        // 对于RECORD_NOT_EXIST和RECORD_INVALID_KEY，继续处理下一个索引
+        LOG_TRACE("Index entry already deleted or invalid. table=%s, index=%s, rc=%s",
+                  table_meta_->name(), index->index_meta().name(), strrc(rc));
+        rc = RC::SUCCESS; // 重置为成功，继续处理其他索引
       }
     }
   }

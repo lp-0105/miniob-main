@@ -196,9 +196,9 @@ RC Table::delete_record_with_trx(const Record &record, Trx *trx)
   return engine_->delete_record_with_trx(record, trx);
 }
 
-RC Table::update_record_with_trx(const Record &old_record, const Record &new_record, Trx* trx)
+RC Table::update_record_with_trx(Trx *trx, const Record &old_record, const Record &new_record)
 {
-  return engine_->update_record_with_trx(old_record, new_record, trx);
+  return engine_->update_record_with_trx(trx, old_record, new_record);
 }
 
 RC Table::get_record(const RID &rid, Record &record)

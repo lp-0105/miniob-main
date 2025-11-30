@@ -137,6 +137,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   char *                                     cstring;
   int                                        number;
   float                                      floats;
+  pair<string, unique_ptr<Expression>> *     multi_column_assign_item;
+  vector<pair<string, unique_ptr<Expression>>> * multi_column_assign;
 }
 
 %destructor { delete $$; } <condition>
@@ -180,6 +182,8 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <expression_list>     group_by
 %type <cstring>             fields_terminated_by
 %type <cstring>             enclosed_by
+%type <multi_column_assign_item> multi_column_assign_item
+%type <multi_column_assign> multi_column_assign
 %type <sql_node>            calc_stmt
 %type <sql_node>            select_stmt
 %type <sql_node>            insert_stmt
@@ -470,7 +474,19 @@ delete_stmt:    /*  delete 语句的语法解析树*/
     }
     ;
 update_stmt:      /*  update 语句的语法解析树*/
-    UPDATE ID SET ID EQ value where 
+    UPDATE ID SET ID EQ expression where 
+    {
+      $$ = new ParsedSqlNode(SCF_UPDATE);
+      $$->update.relation_name = $2;
+      $$->update.attribute_name = $4;
+      $$->update.is_expression = true;
+      $$->update.expression.reset($6);
+      if ($7 != nullptr) {
+        $$->update.conditions.swap(*$7);
+        delete $7;
+      }
+    }
+    | UPDATE ID SET ID EQ value where 
     {
       $$ = new ParsedSqlNode(SCF_UPDATE);
       $$->update.relation_name = $2;
@@ -480,6 +496,65 @@ update_stmt:      /*  update 语句的语法解析树*/
         $$->update.conditions.swap(*$7);
         delete $7;
       }
+    }
+    | UPDATE ID SET multi_column_assign where 
+    {
+      $$ = new ParsedSqlNode(SCF_UPDATE);
+      $$->update.relation_name = $2;
+      
+      // 处理多字段更新
+      vector<pair<string, unique_ptr<Expression>>> *assignments = $4;
+      $$->update.attribute_names.reserve(assignments->size());
+      $$->update.expressions.reserve(assignments->size());
+      $$->update.is_expressions.reserve(assignments->size());
+      
+      for (auto &assignment : *assignments) {
+        $$->update.attribute_names.push_back(assignment.first);
+        $$->update.expressions.push_back(std::move(assignment.second));
+        $$->update.is_expressions.push_back(true);  // 表达式更新
+      }
+      
+      if ($5 != nullptr) {
+        $$->update.conditions.swap(*$5);
+        delete $5;
+      }
+      
+      delete assignments;
+    }
+    ;
+    
+multi_column_assign:
+    multi_column_assign_item
+    {
+      $$ = new vector<pair<string, unique_ptr<Expression>>>;
+      $$->push_back(std::move(*$1));
+      delete $1;
+    }
+    | multi_column_assign COMMA multi_column_assign_item
+    {
+      if ($1 != nullptr) {
+        $$ = $1;
+      } else {
+        $$ = new vector<pair<string, unique_ptr<Expression>>>;
+      }
+      $$->push_back(std::move(*$3));
+      delete $3;
+    }
+    ;
+    
+multi_column_assign_item:
+    ID EQ expression
+    {
+      $$ = new pair<string, unique_ptr<Expression>>;
+      $$->first = $1;
+      $$->second.reset($3);
+    }
+    | ID EQ value
+    {
+      $$ = new pair<string, unique_ptr<Expression>>;
+      $$->first = $1;
+      $$->second.reset(new ValueExpr(*$3));
+      delete $3;
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
