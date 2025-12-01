@@ -17,6 +17,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/sys/rc.h"
 #include "sql/stmt/stmt.h"
 #include "storage/field/field.h"
+#include "sql/operator/join_physical_operator.h"
 
 class FieldMeta;
 class FilterStmt;
@@ -27,6 +28,17 @@ class Table;
  * @brief 表示select语句
  * @ingroup Statement
  */
+
+/**
+ * @brief 表示一个JOIN表
+ * @ingroup Statement
+ */
+struct JoinTable
+{
+  Table *table;                          ///< 表
+  vector<::JoinCondition> join_conditions; ///< JOIN条件列表
+};
+
 class SelectStmt : public Stmt
 {
 public:
@@ -42,6 +54,7 @@ public:
   const vector<Table *> &tables() const { return tables_; }
   FilterStmt            *filter_stmt() const { return filter_stmt_; }
   const vector<FilterStmt *> &join_filter_stmts() const { return join_filter_stmts_; }
+  const vector<JoinTable> &join_tables() const { return join_tables_; }
 
   vector<unique_ptr<Expression>> &query_expressions() { return query_expressions_; }
   vector<unique_ptr<Expression>> &group_by() { return group_by_; }
@@ -52,4 +65,5 @@ private:
   FilterStmt                    *filter_stmt_ = nullptr;
   vector<FilterStmt *>           join_filter_stmts_;
   vector<unique_ptr<Expression>> group_by_;
+  vector<JoinTable>              join_tables_; ///< JOIN表列表
 };

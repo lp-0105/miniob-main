@@ -76,6 +76,38 @@ struct ConditionSqlNode
 };
 
 /**
+ * @brief 描述一个JOIN条件
+ * @ingroup SQLParser
+ * @details JOIN条件用于连接多个表，支持多表连接和多条ON条件
+ * 支持字段与字段的比较，也支持字段与常量的比较
+ */
+struct JoinConditionSqlNode
+{
+  int left_is_attr;              ///< TRUE if left-hand side is an attribute
+                                 ///< 1时，操作符左边是属性名，0时，是属性值
+  Value          left_value;     ///< left-hand side value if left_is_attr = FALSE
+  string         left_relation;  ///< 左表名
+  string         left_attribute; ///< 左表属性名
+  CompOp         comp;           ///< 比较操作符
+  int            right_is_attr;  ///< TRUE if right-hand side is an attribute
+                                 ///< 1时，操作符右边是属性名，0时，是属性值
+  string         right_relation; ///< 右表名
+  string         right_attribute;///< 右表属性名
+  Value          right_value;    ///< right-hand side value if right_is_attr = FALSE
+};
+
+/**
+ * @brief 描述一个JOIN表
+ * @ingroup SQLParser
+ * @details JOIN表包含表名和对应的JOIN条件
+ */
+struct JoinTableSqlNode
+{
+  string table_name;                          ///< 表名
+  vector<JoinConditionSqlNode> join_conditions; ///< JOIN条件列表
+};
+
+/**
  * @brief 描述一个select语句
  * @ingroup SQLParser
  * @details 一个正常的select语句描述起来比这个要复杂很多，这里做了简化。
@@ -92,6 +124,7 @@ struct SelectSqlNode
   vector<string>                 relations;    ///< 查询的表
   vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件
   vector<unique_ptr<Expression>> group_by;     ///< group by clause
+  vector<JoinTableSqlNode>       join_tables;  ///< JOIN表列表
 };
 
 /**

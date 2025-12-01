@@ -13,8 +13,11 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "sql/operator/join_physical_operator.h"
+#include "sql/expr/expression.h"
+#include "common/log/log.h"
 
-NestedLoopJoinPhysicalOperator::NestedLoopJoinPhysicalOperator() {}
+NestedLoopJoinPhysicalOperator::NestedLoopJoinPhysicalOperator(const std::vector<JoinCondition> &join_conditions)
+    : join_conditions_(join_conditions) {}
 
 RC NestedLoopJoinPhysicalOperator::open(Trx *trx)
 {
@@ -36,32 +39,52 @@ RC NestedLoopJoinPhysicalOperator::open(Trx *trx)
 
 RC NestedLoopJoinPhysicalOperator::next()
 {
-  bool left_need_step = (left_tuple_ == nullptr);
-  RC   rc             = RC::SUCCESS;
-  if (round_done_) {
-    left_need_step = true;
-  } else {
+  RC rc = RC::SUCCESS;
+  
+  while (true) {
+    bool left_need_step = (left_tuple_ == nullptr);
+    
+    if (round_done_) {
+      left_need_step = true;
+    } else {
+      rc = right_next();
+      if (rc != RC::SUCCESS) {
+        if (rc == RC::RECORD_EOF) {
+          left_need_step = true;
+        } else {
+          return rc;
+        }
+      } else {
+        // 检查JOIN条件
+        if (join_conditions_.empty() || check_join_conditions()) {
+          return rc;  // 满足JOIN条件，返回结果
+        }
+        // 不满足JOIN条件，继续查找下一个匹配
+        continue;
+      }
+    }
+
+    if (left_need_step) {
+      rc = left_next();
+      if (rc != RC::SUCCESS) {
+        return rc;
+      }
+    }
+
     rc = right_next();
     if (rc != RC::SUCCESS) {
       if (rc == RC::RECORD_EOF) {
-        left_need_step = true;
-      } else {
-        return rc;
+        continue;  // 右表遍历结束，继续左表的下一条记录
       }
-    } else {
-      return rc;  // got one tuple from right
-    }
-  }
-
-  if (left_need_step) {
-    rc = left_next();
-    if (rc != RC::SUCCESS) {
       return rc;
     }
-  }
 
-  rc = right_next();
-  return rc;
+    // 检查JOIN条件
+    if (join_conditions_.empty() || check_join_conditions()) {
+      return rc;  // 满足JOIN条件，返回结果
+    }
+    // 不满足JOIN条件，继续查找下一个匹配
+  }
 }
 
 RC NestedLoopJoinPhysicalOperator::close()
@@ -83,6 +106,70 @@ RC NestedLoopJoinPhysicalOperator::close()
 }
 
 Tuple *NestedLoopJoinPhysicalOperator::current_tuple() { return &joined_tuple_; }
+
+bool NestedLoopJoinPhysicalOperator::check_join_conditions()
+{
+  if (join_conditions_.empty()) {
+    return true; // 没有JOIN条件，直接返回true
+  }
+
+  for (const auto &condition : join_conditions_) {
+    Value left_value, right_value;
+    
+    // 获取左表字段值
+    RC rc = left_tuple_->find_cell(TupleCellSpec(condition.left_table.c_str(), condition.left_field.c_str()), left_value);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("Failed to find left field %s.%s", condition.left_table.c_str(), condition.left_field.c_str());
+      return false;
+    }
+    
+    // 获取右表字段值
+    rc = right_tuple_->find_cell(TupleCellSpec(condition.right_table.c_str(), condition.right_field.c_str()), right_value);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("Failed to find right field %s.%s", condition.right_table.c_str(), condition.right_field.c_str());
+      return false;
+    }
+    
+    // 比较两个值
+    int compare_result = left_value.compare(right_value);
+    if (compare_result == -2) { // 比较失败
+      LOG_WARN("Failed to compare values");
+      return false;
+    }
+    
+    // 根据比较操作符检查条件
+    bool condition_met = false;
+    switch (condition.comp) {
+      case EQUAL_TO:
+        condition_met = (compare_result == 0);
+        break;
+      case LESS_EQUAL:
+        condition_met = (compare_result <= 0);
+        break;
+      case NOT_EQUAL:
+        condition_met = (compare_result != 0);
+        break;
+      case LESS_THAN:
+        condition_met = (compare_result < 0);
+        break;
+      case GREAT_EQUAL:
+        condition_met = (compare_result >= 0);
+        break;
+      case GREAT_THAN:
+        condition_met = (compare_result > 0);
+        break;
+      default:
+        LOG_WARN("Unsupported comparison operator: %d", condition.comp);
+        return false;
+    }
+    
+    if (!condition_met) {
+      return false; // 有一个条件不满足，整个JOIN条件不满足
+    }
+  }
+  
+  return true; // 所有条件都满足
+}
 
 RC NestedLoopJoinPhysicalOperator::left_next()
 {
@@ -122,6 +209,15 @@ RC NestedLoopJoinPhysicalOperator::right_next()
   rc = right_->next();
   if (rc != RC::SUCCESS) {
     if (rc == RC::RECORD_EOF) {
+      // 遇到EOF时立即关闭右表扫描器，以便下次从头开始扫描
+      if (!right_closed_) {
+        RC close_rc = right_->close();
+        if (close_rc != RC::SUCCESS) {
+          LOG_WARN("failed to close right oper. rc=%s", strrc(close_rc));
+        } else {
+          right_closed_ = true;
+        }
+      }
       round_done_ = true;
     }
     return rc;

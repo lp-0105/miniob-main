@@ -16,6 +16,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "sql/operator/physical_operator.h"
 #include "sql/parser/parse.h"
+#include "sql/parser/parse_defs.h"
 
 /**
  * @brief 最简单的两表（称为左表、右表）join算子
@@ -26,6 +27,7 @@ class NestedLoopJoinPhysicalOperator : public PhysicalOperator
 {
 public:
   NestedLoopJoinPhysicalOperator();
+  NestedLoopJoinPhysicalOperator(const std::vector<JoinConditionSqlNode> &join_conditions);
   virtual ~NestedLoopJoinPhysicalOperator() = default;
 
   PhysicalOperatorType type() const override { return PhysicalOperatorType::NESTED_LOOP_JOIN; }
@@ -46,6 +48,7 @@ public:
 private:
   RC left_next();   //! 左表遍历下一条数据
   RC right_next();  //! 右表遍历下一条数据，如果上一轮结束了就重新开始新的一轮
+  bool check_join_conditions();  //! 检查JOIN条件是否满足
 
   // TODO: remove this func
   // Expression *predicate() { return predicate_; }
@@ -61,4 +64,5 @@ private:
   JoinedTuple       joined_tuple_;         //! 当前关联的左右两个tuple
   bool              round_done_   = true;  //! 右表遍历的一轮是否结束
   bool              right_closed_ = true;  //! 右表算子是否已经关闭
+  std::vector<JoinConditionSqlNode> join_conditions_;  //! JOIN条件列表
 };

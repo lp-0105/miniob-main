@@ -18,6 +18,9 @@ RC HeapRecordScanner::open_scan()
   ASSERT(disk_buffer_pool_ != nullptr, "disk buffer pool is null");
   ASSERT(log_handler_ != nullptr, "log handler is null");
 
+  // 重置next_record_状态，确保每次从头开始扫描
+  next_record_.rid().slot_num = -1;
+
   RC rc = bp_iterator_.init(*disk_buffer_pool_, 1);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to init bp iterator. rc=%d:%s", rc, strrc(rc));
@@ -131,6 +134,11 @@ RC HeapRecordScanner::close_scan()
     delete record_page_handler_;
     record_page_handler_ = nullptr;
   }
+
+  // 重置BufferPoolIterator，确保下次open_scan从头开始扫描
+  bp_iterator_.reset();
+  // RecordPageIterator没有reset方法，通过cleanup和后续的init来重置状态
+  // record_page_iterator_会在下次open_scan中重新初始化
 
   return RC::SUCCESS;
 }

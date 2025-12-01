@@ -16,6 +16,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/lang/vector.h"
 #include "sql/expr/tuple.h"
+#include "sql/expr/expression.h"
 #include "common/value.h"
 #include "common/sys/rc.h"
 
@@ -63,7 +64,23 @@ public:
 
     rc = RC::NOTFOUND;
     for (const ExprPointerType &expression : expressions_) {
-      if (0 == strcmp(spec.alias(), expression->name())) {
+      // 检查完整的字段规范匹配：表名+字段名或别名
+      if (expression->type() == ExprType::FIELD) {
+        // 如果是字段表达式，检查表名和字段名是否匹配
+        Expression *base_expr = get_expression_pointer(expression);
+        FieldExpr *field_expr = static_cast<FieldExpr *>(base_expr);
+        const Field &field = field_expr->field();
+        
+        // 检查表名和字段名是否匹配
+        if ((spec.table_name() == nullptr || 0 == strcmp(spec.table_name(), field.table_name())) &&
+            0 == strcmp(spec.field_name(), field.field_name())) {
+          rc = get_value(expression, cell);
+          break;
+        }
+      }
+      
+      // 检查别名是否匹配
+      if (spec.alias() != nullptr && 0 == strcmp(spec.alias(), expression->name())) {
         rc = get_value(expression, cell);
         break;
       }
@@ -82,6 +99,18 @@ private:
       rc = expression->try_get_value(value);
     }
     return rc;
+  }
+
+  // 辅助函数，用于处理原始指针和智能指针
+  Expression *get_expression_pointer(const Expression *expr) const
+  {
+    return const_cast<Expression *>(expr);
+  }
+
+  template<typename T>
+  Expression *get_expression_pointer(const std::unique_ptr<T> &expr) const
+  {
+    return expr.get();
   }
 
 private:

@@ -29,7 +29,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/insert_logical_operator.h"
 #include "sql/operator/insert_physical_operator.h"
 #include "sql/operator/join_logical_operator.h"
-#include "sql/operator/nested_loop_join_physical_operator.h"
+#include "sql/operator/join_physical_operator.h"
 #include "sql/operator/predicate_logical_operator.h"
 #include "sql/operator/predicate_physical_operator.h"
 #include "sql/operator/project_logical_operator.h"
@@ -313,10 +313,39 @@ RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr
     LOG_WARN("join operator should have 2 children, but have %d", child_opers.size());
     return RC::INTERNAL;
   }
+  
+  // 获取JOIN条件并转换为JoinCondition结构体
+  vector<JoinCondition> join_conditions;
+  vector<unique_ptr<Expression>> &join_predicates = join_oper.get_join_predicates();
+  
+  for (auto &predicate : join_predicates) {
+    if (predicate->type() == ExprType::COMPARISON) {
+      auto comparison_expr = static_cast<ComparisonExpr *>(predicate.get());
+      
+      // 检查是否为字段之间的比较
+      unique_ptr<Expression> &left_expr = comparison_expr->left();
+      unique_ptr<Expression> &right_expr = comparison_expr->right();
+      
+      if (left_expr->type() == ExprType::FIELD && right_expr->type() == ExprType::FIELD) {
+        auto left_field_expr = static_cast<FieldExpr *>(left_expr.get());
+        auto right_field_expr = static_cast<FieldExpr *>(right_expr.get());
+        
+        JoinCondition condition;
+        condition.left_table = left_field_expr->table_name() ? left_field_expr->table_name() : "";
+        condition.left_field = left_field_expr->field_name();
+        condition.right_table = right_field_expr->table_name() ? right_field_expr->table_name() : "";
+        condition.right_field = right_field_expr->field_name();
+        condition.comp = comparison_expr->comp();
+        
+        join_conditions.push_back(condition);
+      }
+    }
+  }
+  
   if (session->hash_join_on() && can_use_hash_join(join_oper)) {
     // your code here
   } else {
-    unique_ptr<PhysicalOperator> join_physical_oper(new NestedLoopJoinPhysicalOperator());
+    unique_ptr<PhysicalOperator> join_physical_oper(new NestedLoopJoinPhysicalOperator(join_conditions));
     for (auto &child_oper : child_opers) {
       unique_ptr<PhysicalOperator> child_physical_oper;
       rc = create(*child_oper, child_physical_oper, session);

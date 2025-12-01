@@ -101,8 +101,10 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
   }
 
   const vector<Table *> &tables = select_stmt->tables();
-  for (Table *table : tables) {
+  const vector<JoinTable> &join_tables = select_stmt->join_tables();
 
+  // 处理基础表
+  for (Table *table : tables) {
     unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(table, ReadWriteMode::READ_ONLY));
     if (table_oper == nullptr) {
       table_oper = std::move(table_get_oper);
@@ -112,6 +114,71 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
       join_oper->add_child(std::move(table_get_oper));
       table_oper = unique_ptr<LogicalOperator>(join_oper);
     }
+  }
+
+  // 处理JOIN表
+  for (const JoinTable &join_table : join_tables) {
+    unique_ptr<LogicalOperator> table_get_oper(new TableGetLogicalOperator(join_table.table, ReadWriteMode::READ_ONLY));
+    
+    JoinLogicalOperator *join_oper = new JoinLogicalOperator;
+    join_oper->add_child(std::move(table_oper));
+    join_oper->add_child(std::move(table_get_oper));
+    
+    // 添加JOIN条件
+    for (const JoinCondition &join_condition : join_table.join_conditions) {
+      // 查找左表
+      Table *left_table = nullptr;
+      for (Table *table : tables) {
+        if (strcmp(table->name(), join_condition.left_table.c_str()) == 0) {
+          left_table = table;
+          break;
+        }
+      }
+      
+      // 查找右表
+      Table *right_table = nullptr;
+      for (Table *table : tables) {
+        if (strcmp(table->name(), join_condition.right_table.c_str()) == 0) {
+          right_table = table;
+          break;
+        }
+      }
+      
+      if (left_table == nullptr || right_table == nullptr) {
+        LOG_WARN("cannot find table for join condition: left_table=%s, right_table=%s", 
+                 join_condition.left_table.c_str(), join_condition.right_table.c_str());
+        return RC::SCHEMA_TABLE_NOT_EXIST;
+      }
+      
+      // 查找左字段
+      const FieldMeta *left_field = left_table->table_meta().field(join_condition.left_field.c_str());
+      if (left_field == nullptr) {
+        LOG_WARN("cannot find field in left table: table=%s, field=%s", 
+                 left_table->name(), join_condition.left_field.c_str());
+        return RC::SCHEMA_FIELD_NOT_EXIST;
+      }
+      
+      // 查找右字段
+      const FieldMeta *right_field = right_table->table_meta().field(join_condition.right_field.c_str());
+      if (right_field == nullptr) {
+        LOG_WARN("cannot find field in right table: table=%s, field=%s", 
+                 right_table->name(), join_condition.right_field.c_str());
+        return RC::SCHEMA_FIELD_NOT_EXIST;
+      }
+      
+      // 创建左字段表达式
+      unique_ptr<Expression> left_expr(new FieldExpr(Field(left_table, left_field)));
+      
+      // 创建右字段表达式
+      unique_ptr<Expression> right_expr(new FieldExpr(Field(right_table, right_field)));
+      
+      // 创建比较表达式
+      unique_ptr<Expression> join_predicate(new ComparisonExpr(join_condition.comp, std::move(left_expr), std::move(right_expr)));
+      
+      join_oper->add_join_predicate(std::move(join_predicate));
+    }
+    
+    table_oper = unique_ptr<LogicalOperator>(join_oper);
   }
 
 

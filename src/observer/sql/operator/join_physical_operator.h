@@ -18,6 +18,18 @@ See the Mulan PSL v2 for more details. */
 #include "sql/parser/parse.h"
 
 /**
+ * @brief JOIN条件结构体
+ * @details 描述两个表之间的连接条件
+ */
+struct JoinCondition {
+  std::string left_table;   ///< 左表名
+  std::string left_field;   ///< 左表字段名
+  std::string right_table;  ///< 右表名
+  std::string right_field;  ///< 右表字段名
+  CompOp comp;              ///< 比较操作符
+};
+
+/**
  * @brief 最简单的两表（称为左表、右表）join算子
  * @details 依次遍历左表的每一行，然后关联右表的每一行
  * @ingroup PhysicalOperator
@@ -25,7 +37,7 @@ See the Mulan PSL v2 for more details. */
 class NestedLoopJoinPhysicalOperator : public PhysicalOperator
 {
 public:
-  NestedLoopJoinPhysicalOperator();
+  NestedLoopJoinPhysicalOperator(const std::vector<JoinCondition> &join_conditions = {});
   virtual ~NestedLoopJoinPhysicalOperator() = default;
 
   PhysicalOperatorType type() const override { return PhysicalOperatorType::NESTED_LOOP_JOIN; }
@@ -38,6 +50,7 @@ public:
 private:
   RC left_next();   //! 左表遍历下一条数据
   RC right_next();  //! 右表遍历下一条数据，如果上一轮结束了就重新开始新的一轮
+  bool check_join_conditions(); //! 检查JOIN条件是否满足
 
 private:
   Trx *trx_ = nullptr;
@@ -50,4 +63,5 @@ private:
   JoinedTuple       joined_tuple_;         //! 当前关联的左右两个tuple
   bool              round_done_   = true;  //! 右表遍历的一轮是否结束
   bool              right_closed_ = true;  //! 右表算子是否已经关闭
+  std::vector<JoinCondition> join_conditions_; ///< JOIN条件列表
 };

@@ -19,6 +19,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/db/db.h"
 #include "storage/table/table.h"
 #include "sql/parser/expression_binder.h"
+#include "sql/operator/join_physical_operator.h"
 
 using namespace std;
 using namespace common;
@@ -68,6 +69,57 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     table_map.insert({table_name, table});
   }
 
+  // collect join tables
+  vector<JoinTable> join_tables;
+  for (const auto &join_table_sql : select_sql.join_tables) {
+    const char *table_name = join_table_sql.table_name.c_str();
+    if (nullptr == table_name) {
+      LOG_WARN("invalid argument. join table name is null");
+      return RC::INVALID_ARGUMENT;
+    }
+
+    Table *table = db->find_table(table_name);
+    if (nullptr == table) {
+      LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
+      return RC::SCHEMA_TABLE_NOT_EXIST;
+    }
+
+    binder_context.add_table(table);
+    tables.push_back(table);
+    table_map.insert({table_name, table});
+
+    JoinTable join_table;
+    join_table.table = table;
+
+    // process join conditions
+    for (const auto &join_condition_sql : join_table_sql.join_conditions) {
+      JoinCondition join_condition;
+      join_condition.comp = join_condition_sql.comp;
+
+      // find left table and field
+      auto left_table_it = table_map.find(join_condition_sql.left_relation);
+      if (left_table_it == table_map.end()) {
+        LOG_WARN("left table not found in join condition: %s", join_condition_sql.left_relation.c_str());
+        return RC::SCHEMA_TABLE_NOT_EXIST;
+      }
+      join_condition.left_table = join_condition_sql.left_relation;
+      join_condition.left_field = join_condition_sql.left_attribute;
+
+      // find right table and field
+      auto right_table_it = table_map.find(join_condition_sql.right_relation);
+      if (right_table_it == table_map.end()) {
+        LOG_WARN("right table not found in join condition: %s", join_condition_sql.right_relation.c_str());
+        return RC::SCHEMA_TABLE_NOT_EXIST;
+      }
+      join_condition.right_table = join_condition_sql.right_relation;
+      join_condition.right_field = join_condition_sql.right_attribute;
+
+      join_table.join_conditions.push_back(join_condition);
+    }
+
+    join_tables.push_back(join_table);
+  }
+
   // collect query fields in `select` statement
   vector<unique_ptr<Expression>> bound_expressions;
   ExpressionBinder expression_binder(binder_context);
@@ -107,6 +159,60 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     return rc;
   }
 
+  // 将JOIN条件合并到FilterStmt中
+  // 遍历所有JOIN表，将JOIN条件转换为ConditionSqlNode并添加到FilterStmt中
+  vector<ConditionSqlNode> all_conditions(select_sql.conditions);
+  
+  for (const auto &join_table_sql : select_sql.join_tables) {
+    for (const auto &join_condition_sql : join_table_sql.join_conditions) {
+      ConditionSqlNode condition;
+      condition.comp = join_condition_sql.comp;
+      
+      // 处理左操作数
+      if (!join_condition_sql.left_relation.empty() && !join_condition_sql.left_attribute.empty()) {
+        // 左操作数是字段
+        condition.left_is_attr = 1;
+        condition.left_attr.relation_name = join_condition_sql.left_relation;
+        condition.left_attr.attribute_name = join_condition_sql.left_attribute;
+      } else {
+        // 左操作数是常量值
+        condition.left_is_attr = 0;
+        condition.left_value = join_condition_sql.left_value;
+      }
+      
+      // 处理右操作数
+      if (!join_condition_sql.right_relation.empty() && !join_condition_sql.right_attribute.empty()) {
+        // 右操作数是字段
+        condition.right_is_attr = 1;
+        condition.right_attr.relation_name = join_condition_sql.right_relation;
+        condition.right_attr.attribute_name = join_condition_sql.right_attribute;
+      } else {
+        // 右操作数是常量值
+        condition.right_is_attr = 0;
+        condition.right_value = join_condition_sql.right_value;
+      }
+      
+      all_conditions.push_back(condition);
+    }
+  }
+  
+  // 重新创建包含JOIN条件的FilterStmt
+  if (filter_stmt != nullptr) {
+    delete filter_stmt;
+    filter_stmt = nullptr;
+  }
+  
+  rc = FilterStmt::create(db,
+      default_table,
+      &table_map,
+      all_conditions.data(),
+      static_cast<int>(all_conditions.size()),
+      filter_stmt);
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("cannot construct filter stmt with join conditions");
+    return rc;
+  }
+
   // everything alright
   SelectStmt *select_stmt = new SelectStmt();
 
@@ -114,6 +220,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   select_stmt->query_expressions_.swap(bound_expressions);
   select_stmt->filter_stmt_ = filter_stmt;
   select_stmt->group_by_.swap(group_by_expressions);
+  select_stmt->join_tables_.swap(join_tables);
   stmt = select_stmt;
   return RC::SUCCESS;
 }

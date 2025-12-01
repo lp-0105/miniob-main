@@ -117,6 +117,9 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         LE
         GE
         NE
+        JOIN
+        INNER
+        AS
 
 /** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
 %union {
@@ -137,6 +140,10 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   char *                                     cstring;
   int                                        number;
   float                                      floats;
+  vector<JoinConditionSqlNode> *             join_condition_list;
+  JoinConditionSqlNode *                     join_condition;
+  vector<JoinTableSqlNode> *                 join_table_list;
+  pair<vector<string>, vector<JoinTableSqlNode>> * relation_pair;
 }
 
 %destructor { delete $$; } <condition>
@@ -150,6 +157,10 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 // %destructor { delete $$; } <rel_attr_list>
 %destructor { delete $$; } <relation_list>
 %destructor { delete $$; } <key_list>
+%destructor { delete $$; } <join_condition_list>
+%destructor { delete $$; } <join_condition>
+%destructor { delete $$; } <join_table_list>
+%destructor { delete $$; } <relation_pair>
 
 %token <number> NUMBER
 %token <floats> FLOAT
@@ -173,7 +184,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <cstring>             storage_format
 %type <key_list>            primary_key
 %type <key_list>            attr_list
-%type <relation_list>       rel_list
+%type <relation_pair>       rel_list
 %type <expression>          expression
 %type <expression>          aggregate_expression
 %type <expression_list>     expression_list
@@ -204,6 +215,9 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <sql_node>            command_wrapper
 // commands should be a list but I use a single command instead
 %type <sql_node>            commands
+%type <join_condition_list>  join_condition_list
+%type <join_condition>       join_condition
+%type <join_table_list>      join_relation_list
 
 %left '+' '-'
 %left '*' '/'
@@ -492,7 +506,8 @@ select_stmt:        /*  select 语句的语法解析树*/
       }
 
       if ($4 != nullptr) {
-        $$->selection.relations.swap(*$4);
+        $$->selection.relations.swap($4->first);
+        $$->selection.join_tables.swap($4->second);
         delete $4;
       }
 
@@ -569,6 +584,11 @@ expression:
     | aggregate_expression {
       $$ = $1;
     }
+    | expression AS ID {
+      // 字段别名支持
+      $$ = $1;
+      $$->set_name($3);
+    }
     ;
 
 aggregate_expression:
@@ -593,20 +613,123 @@ relation:
     ID {
       $$ = $1;
     }
+    | ID ID {  /* 表名 别名 */
+      $$ = $1;  /* 返回表名，别名信息需要额外处理 */
+      // TODO: 这里需要处理表别名信息
+    }
     ;
 rel_list:
     relation {
-      $$ = new vector<string>();
-      $$->push_back($1);
+      $$ = new pair<vector<string>, vector<JoinTableSqlNode>>();
+      $$->first.push_back($1);
     }
     | relation COMMA rel_list {
       if ($3 != nullptr) {
         $$ = $3;
       } else {
-        $$ = new vector<string>;
+        $$ = new pair<vector<string>, vector<JoinTableSqlNode>>();
       }
 
-      $$->insert($$->begin(), $1);
+      $$->first.insert($$->first.begin(), $1);
+    }
+    | relation join_relation_list {
+      $$ = new pair<vector<string>, vector<JoinTableSqlNode>>();
+      $$->first.push_back($1);
+      if ($2 != nullptr) {
+        $$->second.swap(*$2);
+        delete $2;
+      }
+    }
+    ;
+
+join_relation_list:
+    INNER JOIN relation ON join_condition_list {
+      $$ = new vector<JoinTableSqlNode>();
+      JoinTableSqlNode join_table;
+      join_table.table_name = $3;
+      if ($5 != nullptr) {
+        join_table.join_conditions.swap(*$5);
+        delete $5;
+      }
+      $$->push_back(join_table);
+    }
+    | JOIN relation ON join_condition_list {
+      $$ = new vector<JoinTableSqlNode>();
+      JoinTableSqlNode join_table;
+      join_table.table_name = $2;
+      if ($4 != nullptr) {
+        join_table.join_conditions.swap(*$4);
+        delete $4;
+      }
+      $$->push_back(join_table);
+    }
+    | INNER JOIN relation ON join_condition_list join_relation_list {
+      $$ = $6;
+      JoinTableSqlNode join_table;
+      join_table.table_name = $3;
+      if ($5 != nullptr) {
+        join_table.join_conditions.swap(*$5);
+        delete $5;
+      }
+      $$->insert($$->begin(), join_table);
+    }
+    | JOIN relation ON join_condition_list join_relation_list {
+      $$ = $5;
+      JoinTableSqlNode join_table;
+      join_table.table_name = $2;
+      if ($4 != nullptr) {
+        join_table.join_conditions.swap(*$4);
+        delete $4;
+      }
+      $$->insert($$->begin(), join_table);
+    }
+    ;
+
+join_condition_list:
+    join_condition {
+      $$ = new vector<JoinConditionSqlNode>();
+      $$->push_back(*$1);
+      delete $1;
+    }
+    | join_condition AND join_condition_list {
+      $$ = $3;
+      $$->push_back(*$1);
+      delete $1;
+    }
+    ;
+
+join_condition:
+    rel_attr comp_op rel_attr {
+      $$ = new JoinConditionSqlNode();
+      $$->left_relation = $1->relation_name;
+      $$->left_attribute = $1->attribute_name;
+      $$->right_relation = $3->relation_name;
+      $$->right_attribute = $3->attribute_name;
+      $$->comp = $2;
+      delete $1;
+      delete $3;
+    }
+    | rel_attr comp_op value {
+      $$ = new JoinConditionSqlNode();
+      $$->left_relation = $1->relation_name;
+      $$->left_attribute = $1->attribute_name;
+      $$->right_relation = ""; // 常量条件没有右表
+      $$->right_attribute = ""; // 常量条件没有右字段
+      $$->right_value = *$3; // 存储常量值
+      $$->comp = $2;
+      delete $1;
+      delete $3;
+    }
+    | value comp_op rel_attr {
+      $$ = new JoinConditionSqlNode();
+      $$->left_relation = ""; // 常量条件没有左表
+      $$->left_attribute = ""; // 常量条件没有左字段
+      $$->left_value = *$1; // 存储常量值
+      $$->right_relation = $3->relation_name;
+      $$->right_attribute = $3->attribute_name;
+      $$->comp = $2;
+      delete $1;
+      delete $3;
     }
     ;
 
