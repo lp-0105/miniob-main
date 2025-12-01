@@ -95,12 +95,7 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update, Stmt *&stmt)
   Value *values = new Value[1];
   values[0] = value;
 
-  UpdateStmt *update_stmt = new UpdateStmt();
-  update_stmt->table_ = table;
-  update_stmt->attribute_name_ = strdup(attribute_name);
-  update_stmt->values_ = values;
-  update_stmt->value_amount_ = 1;
-  update_stmt->filter_stmt_ = filter_stmt;
+  UpdateStmt *update_stmt = new UpdateStmt(table, strdup(attribute_name), values, 1, filter_stmt);
 
   stmt = update_stmt;
   return RC::SUCCESS;

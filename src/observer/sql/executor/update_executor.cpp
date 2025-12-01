@@ -145,7 +145,13 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
     const Value &value = update_stmt->values()[0];
     // 创建新的记录
     Record new_record;
-    char *new_data = new char[record.len()];
+    char *new_data = (char *)malloc(record.len());
+    if (nullptr == new_data) {
+      LOG_WARN("failed to allocate memory for new record data");
+      scanner->close_scan();
+      delete scanner;
+      return RC::NOMEM;
+    }
     memcpy(new_data, record.data(), record.len());
     new_record.set_data_owner(new_data, record.len());
     new_record.set_rid(record.rid());
@@ -162,13 +168,14 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
     
     // 使用update_record_with_trx方法更新记录
     rc = table->update_record_with_trx(record, new_record, trx);
-    delete[] new_data;
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to update record");
       scanner->close_scan();
       delete scanner;
       return rc;
     }
+    // 注意：不要手动删除new_data，因为Record对象通过set_data_owner已经获得了所有权
+    // 当Record对象析构时，会自动释放内存
 
     updated_count++;
   }

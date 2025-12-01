@@ -103,6 +103,164 @@ RC HeapTableEngine::delete_record(const Record &record)
   return rc;
 }
 
+RC HeapTableEngine::insert_record_with_trx(Record &record, Trx *trx)
+{
+  RC rc = RC::SUCCESS;
+  
+  // 1. 先插入记录到文件
+  rc = record_handler_->insert_record(record.data(), table_meta_->record_size(), &record.rid());
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to insert record. table name=%s, rc=%s", table_meta_->name(), strrc(rc));
+    return rc;
+  }
+  
+  // 2. 插入索引条目
+  rc = insert_entry_of_indexes(record.data(), record.rid());
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to insert record into indexes. table name=%s, rid=%s, rc=%s",
+              table_meta_->name(), record.rid().to_string().c_str(), strrc(rc));
+    // 回滚：删除已插入的记录
+    RC rc2 = record_handler_->delete_record(&record.rid());
+    if (rc2 != RC::SUCCESS) {
+      LOG_ERROR("Failed to rollback record insertion after index failure. table name=%s, rid=%s, rc=%s",
+                table_meta_->name(), record.rid().to_string().c_str(), strrc(rc2));
+    }
+    return rc;
+  }
+  
+  // 3. 事务处理
+  if (trx != nullptr) {
+    rc = trx->insert_record(table_, record);
+    if (rc != RC::SUCCESS) {
+      LOG_ERROR("Failed to insert record in transaction. table name=%s, rid=%s, rc=%s",
+                table_meta_->name(), record.rid().to_string().c_str(), strrc(rc));
+      // 回滚整个操作
+      RC rc2 = delete_entry_of_indexes(record.data(), record.rid(), false);
+      RC rc3 = record_handler_->delete_record(&record.rid());
+      if (rc2 != RC::SUCCESS || rc3 != RC::SUCCESS) {
+        LOG_ERROR("Failed to rollback transaction insertion");
+      }
+      return rc;
+    }
+  }
+  
+  return RC::SUCCESS;
+}
+
+RC HeapTableEngine::delete_record_with_trx(const Record &record, Trx *trx)
+{
+  RC rc = RC::SUCCESS;
+  
+  // 1. 先删除索引条目
+  rc = delete_entry_of_indexes(record.data(), record.rid(), false);
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to delete record from indexes. table name=%s, rid=%s, rc=%s",
+              table_meta_->name(), record.rid().to_string().c_str(), strrc(rc));
+    return rc;
+  }
+  
+  // 2. 删除记录
+  rc = record_handler_->delete_record(&record.rid());
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to delete record. table name=%s, rid=%s, rc=%s",
+              table_meta_->name(), record.rid().to_string().c_str(), strrc(rc));
+    // 回滚：重新插入索引条目
+    RC rc2 = insert_entry_of_indexes(record.data(), record.rid());
+    if (rc2 != RC::SUCCESS) {
+      LOG_ERROR("Failed to rollback index deletion after record deletion failure. table name=%s, rid=%s, rc=%s",
+                table_meta_->name(), record.rid().to_string().c_str(), strrc(rc2));
+    }
+    return rc;
+  }
+  
+  // 3. 事务处理
+  if (trx != nullptr) {
+    // 创建一个非const的Record对象用于事务处理
+    Record non_const_record;
+    non_const_record.set_rid(record.rid());
+    // 复制记录数据
+    char *data = new char[table_meta_->record_size()];
+    memcpy(data, record.data(), table_meta_->record_size());
+    non_const_record.set_data(data, table_meta_->record_size());
+    
+    rc = trx->delete_record(table_, non_const_record);
+    if (rc != RC::SUCCESS) {
+      LOG_ERROR("Failed to delete record in transaction. table name=%s, rid=%s, rc=%s",
+                table_meta_->name(), record.rid().to_string().c_str(), strrc(rc));
+      // 回滚整个操作
+      RC rc2 = insert_entry_of_indexes(record.data(), record.rid());
+      RID new_rid;
+      RC rc3 = record_handler_->insert_record(record.data(), table_meta_->record_size(), &new_rid);
+      if (rc2 != RC::SUCCESS || rc3 != RC::SUCCESS) {
+        LOG_ERROR("Failed to rollback transaction deletion");
+      }
+      delete[] data;
+      return rc;
+    }
+    delete[] data;
+  }
+  
+  return RC::SUCCESS;
+}
+
+RC HeapTableEngine::update_record_with_trx(const Record &old_record, const Record &new_record, Trx *trx)
+{
+  RC rc = RC::SUCCESS;
+  
+  // 1. 首先删除旧记录在索引中的条目
+  rc = delete_entry_of_indexes(old_record.data(), old_record.rid(), false /*error_on_not_exists*/);
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to delete old record from indexes. table name=%s, rid=%s, rc=%s",
+              table_meta_->name(), old_record.rid().to_string().c_str(), strrc(rc));
+    return rc;
+  }
+  
+  // 2. 使用visit_record更新记录数据
+  rc = record_handler_->visit_record(old_record.rid(), [&](Record &record) {
+    // 复制新记录数据到当前记录
+    memcpy(record.data(), new_record.data(), record.len());
+    return true; // 返回true表示记录被修改
+  });
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to update record. table name=%s, rid=%s, rc=%s",
+              table_meta_->name(), old_record.rid().to_string().c_str(), strrc(rc));
+    
+    // 回滚：重新插入旧记录到索引
+    RC rc2 = insert_entry_of_indexes(old_record.data(), old_record.rid());
+    if (rc2 != RC::SUCCESS) {
+      LOG_ERROR("Failed to rollback index entries after update failure. table name=%s, rid=%s, rc=%s",
+                table_meta_->name(), old_record.rid().to_string().c_str(), strrc(rc2));
+    }
+    return rc;
+  }
+  
+  // 3. 插入新记录到索引
+  rc = insert_entry_of_indexes(new_record.data(), new_record.rid());
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to insert new record into indexes. table name=%s, rid=%s, rc=%s",
+              table_meta_->name(), new_record.rid().to_string().c_str(), strrc(rc));
+    
+    // 回滚：恢复旧记录数据和索引
+    RC rc2 = record_handler_->visit_record(new_record.rid(), [&](Record &record) {
+      memcpy(record.data(), old_record.data(), record.len());
+      return true;
+    });
+    if (rc2 != RC::SUCCESS) {
+      LOG_ERROR("Failed to rollback record data after index update failure. table name=%s, rid=%s, rc=%s",
+                table_meta_->name(), new_record.rid().to_string().c_str(), strrc(rc2));
+    }
+    
+    RC rc3 = insert_entry_of_indexes(old_record.data(), old_record.rid());
+    if (rc3 != RC::SUCCESS) {
+      LOG_ERROR("Failed to rollback index entries after index update failure. table name=%s, rid=%s, rc=%s",
+                table_meta_->name(), old_record.rid().to_string().c_str(), strrc(rc3));
+    }
+    return rc;
+  }
+  
+  return RC::SUCCESS;
+}
+
 RC HeapTableEngine::get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWriteMode mode)
 {
   scanner = new HeapRecordScanner(table_, *data_buffer_pool_, trx, db_->log_handler(), mode, nullptr);
