@@ -144,6 +144,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
   JoinConditionSqlNode *                     join_condition;
   vector<JoinTableSqlNode> *                 join_table_list;
   pair<vector<string>, vector<JoinTableSqlNode>> * relation_pair;
+  std::vector<std::string> *                 string_list;
 }
 
 %destructor { delete $$; } <condition>
@@ -161,6 +162,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %destructor { delete $$; } <join_condition>
 %destructor { delete $$; } <join_table_list>
 %destructor { delete $$; } <relation_pair>
+%destructor { delete $$; } <string_list>
 
 %token <number> NUMBER
 %token <floats> FLOAT
@@ -213,6 +215,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <sql_node>            help_stmt
 %type <sql_node>            exit_stmt
 %type <sql_node>            command_wrapper
+%type <string_list>          id_list
 // commands should be a list but I use a single command instead
 %type <sql_node>            commands
 %type <join_condition_list>  join_condition_list
@@ -317,13 +320,15 @@ desc_table_stmt:
     ;
 
 create_index_stmt:    /*create index 语句的语法解析树*/
-    CREATE INDEX ID ON ID LBRACE ID RBRACE
+    CREATE INDEX ID ON ID LBRACE id_list RBRACE
     {
       $$ = new ParsedSqlNode(SCF_CREATE_INDEX);
       CreateIndexSqlNode &create_index = $$->create_index;
       create_index.index_name = $3;
       create_index.relation_name = $5;
-      create_index.attribute_name = $7;
+      create_index.attribute_names.swap(*$7);  // 多字段
+      // 不要在这里free($3)和free($5)，由sql_parse函数统一管理内存释放
+      delete $7;
     }
     ;
 
@@ -899,6 +904,22 @@ set_variable_stmt:
 
 opt_semicolon: /*empty*/
     | SEMICOLON
+    ;
+
+/* 添加字段名列表规则 */
+id_list:
+    ID
+    {
+      $$ = new std::vector<std::string>;
+      $$->push_back($1);
+      // 不要在这里free($1)，由sql_parse函数统一管理内存释放
+    }
+    | id_list COMMA ID
+    {
+      $$ = $1;
+      $$->push_back($3);
+      // 不要在这里free($3)，由sql_parse函数统一管理内存释放
+    }
     ;
 %%
 //_____________________________________________________________________

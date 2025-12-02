@@ -19,53 +19,74 @@ See the Mulan PSL v2 for more details. */
 
 BplusTreeIndex::~BplusTreeIndex() noexcept { close(); }
 
-RC BplusTreeIndex::create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
+RC BplusTreeIndex::create(Table *table, const char *file_name, const IndexMeta &index_meta, const std::vector<const FieldMeta *> &field_metas)
 {
   if (inited_) {
-    LOG_WARN("Failed to create index due to the index has been created before. file_name:%s, index:%s, field:%s",
-        file_name, index_meta.name(), index_meta.field());
+    LOG_WARN("Failed to create index due to the index has been created before. file_name:%s, index:%s",
+        file_name, index_meta.name());
     return RC::RECORD_OPENNED;
   }
 
-  Index::init(index_meta, field_meta);
+  if (field_metas.empty()) {
+    LOG_WARN("Failed to create index due to no fields specified. file_name:%s, index:%s",
+        file_name, index_meta.name());
+    return RC::INVALID_ARGUMENT;
+  }
+
+  Index::init(index_meta, field_metas);
+
+  // ⭐ 计算复合键长度
+  int key_length = 0;
+  for (const FieldMeta *field : field_metas) {
+    key_length += field->len();
+  }
+  
+  // 需要确定复合键的类型，通常用第一个字段的类型或 CHARS
+  AttrType key_type = field_metas[0]->type();
 
   BufferPoolManager &bpm = table->db()->buffer_pool_manager();
-  RC rc = index_handler_.create(table->db()->log_handler(), bpm, file_name, field_meta.type(), field_meta.len());
+  RC rc = index_handler_.create(table->db()->log_handler(), bpm, file_name, key_type, key_length);
   if (RC::SUCCESS != rc) {
-    LOG_WARN("Failed to create index_handler, file_name:%s, index:%s, field:%s, rc:%s",
-        file_name, index_meta.name(), index_meta.field(), strrc(rc));
+    LOG_WARN("Failed to create index_handler, file_name:%s, index:%s, rc:%s",
+        file_name, index_meta.name(), strrc(rc));
     return rc;
   }
 
   inited_ = true;
   table_  = table;
-  LOG_INFO("Successfully create index, file_name:%s, index:%s, field:%s",
-    file_name, index_meta.name(), index_meta.field());
+  LOG_INFO("Successfully create index, file_name:%s, index:%s",
+    file_name, index_meta.name());
   return RC::SUCCESS;
 }
 
-RC BplusTreeIndex::open(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
+RC BplusTreeIndex::open(Table *table, const char *file_name, const IndexMeta &index_meta, const std::vector<const FieldMeta *> &field_metas)
 {
   if (inited_) {
-    LOG_WARN("Failed to open index due to the index has been initedd before. file_name:%s, index:%s, field:%s",
-        file_name, index_meta.name(), index_meta.field());
+    LOG_WARN("Failed to open index due to the index has been initedd before. file_name:%s, index:%s",
+        file_name, index_meta.name());
     return RC::RECORD_OPENNED;
   }
 
-  Index::init(index_meta, field_meta);
+  if (field_metas.empty()) {
+    LOG_WARN("Failed to open index due to no fields specified. file_name:%s, index:%s",
+        file_name, index_meta.name());
+    return RC::INVALID_ARGUMENT;
+  }
+
+  Index::init(index_meta, field_metas);
 
   BufferPoolManager &bpm = table->db()->buffer_pool_manager();
   RC rc = index_handler_.open(table->db()->log_handler(), bpm, file_name);
   if (RC::SUCCESS != rc) {
-    LOG_WARN("Failed to open index_handler, file_name:%s, index:%s, field:%s, rc:%s",
-        file_name, index_meta.name(), index_meta.field(), strrc(rc));
+    LOG_WARN("Failed to open index_handler, file_name:%s, index:%s, rc:%s",
+        file_name, index_meta.name(), strrc(rc));
     return rc;
   }
 
   inited_ = true;
   table_  = table;
-  LOG_INFO("Successfully open index, file_name:%s, index:%s, field:%s",
-    file_name, index_meta.name(), index_meta.field());
+  LOG_INFO("Successfully open index, file_name:%s, index:%s",
+    file_name, index_meta.name());
   return RC::SUCCESS;
 }
 
@@ -80,14 +101,37 @@ RC BplusTreeIndex::close()
   return RC::SUCCESS;
 }
 
+// ⭐ 构造复合键
+void BplusTreeIndex::make_key(const char *record, char *key) const
+{
+  int offset = 0;
+  for (const FieldMeta *field : field_metas_) {
+    memcpy(key + offset, record + field->offset(), field->len());
+    offset += field->len();
+  }
+}
+
 RC BplusTreeIndex::insert_entry(const char *record, const RID *rid)
 {
-  return index_handler_.insert_entry(record + field_meta_.offset(), rid);
+  // ⭐ 使用复合键
+  char *key = new char[key_length_];
+  make_key(record, key);
+  
+  RC rc = index_handler_.insert_entry(key, rid);
+  
+  delete[] key;
+  return rc;
 }
 
 RC BplusTreeIndex::delete_entry(const char *record, const RID *rid)
 {
-  return index_handler_.delete_entry(record + field_meta_.offset(), rid);
+  char *key = new char[key_length_];
+  make_key(record, key);
+  
+  RC rc = index_handler_.delete_entry(key, rid);
+  
+  delete[] key;
+  return rc;
 }
 
 IndexScanner *BplusTreeIndex::create_scanner(

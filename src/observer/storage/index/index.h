@@ -40,11 +40,11 @@ public:
   Index()          = default;
   virtual ~Index() = default;
 
-  virtual RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
+  virtual RC create(Table *table, const char *file_name, const IndexMeta &index_meta, const std::vector<const FieldMeta *> &field_metas)
   {
     return RC::UNSUPPORTED;
   }
-  virtual RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const FieldMeta &field_meta)
+  virtual RC open(Table *table, const char *file_name, const IndexMeta &index_meta, const std::vector<const FieldMeta *> &field_metas)
   {
     return RC::UNSUPPORTED;
   }
@@ -89,11 +89,12 @@ public:
   virtual RC sync() = 0;
 
 protected:
-  RC init(const IndexMeta &index_meta, const FieldMeta &field_meta);
+  RC init(const IndexMeta &index_meta, const std::vector<const FieldMeta *> &field_metas);
 
 protected:
   IndexMeta index_meta_;  ///< 索引的元数据
-  FieldMeta field_meta_;  ///< 当前实现仅考虑一个字段的索引
+  std::vector<const FieldMeta *> field_metas_;  ///< 支持多字段索引
+  int key_length_ = 0;  ///< 复合键总长度
 };
 
 /**

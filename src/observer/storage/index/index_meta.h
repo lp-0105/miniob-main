@@ -16,6 +16,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/sys/rc.h"
 #include "common/lang/string.h"
+#include <vector>
 
 class TableMeta;
 class FieldMeta;
@@ -35,11 +36,16 @@ class IndexMeta
 public:
   IndexMeta() = default;
 
-  RC init(const char *name, const FieldMeta &field);
+  // ⭐ 修改为支持多字段
+  RC init(const char *name, const std::vector<const FieldMeta *> &fields);
 
 public:
   const char *name() const;
-  const char *field() const;
+  const std::vector<std::string> &fields() const { return fields_; }
+  int field_count() const { return fields_.size(); }
+  const char *field(int i) const { return fields_[i].c_str(); }
+  // ⭐ 向后兼容：返回第一个字段名
+  const char *field() const { return fields_.empty() ? "" : fields_[0].c_str(); }
 
   void desc(ostream &os) const;
 
@@ -48,6 +54,6 @@ public:
   static RC from_json(const TableMeta &table, const Json::Value &json_value, IndexMeta &index);
 
 protected:
-  string name_;   // index's name
-  string field_;  // field's name
+  std::string name_;
+  std::vector<std::string> fields_;  // ⭐ 改为多字段
 };
