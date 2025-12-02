@@ -234,10 +234,11 @@ RC ComparisonExpr::eval(Chunk &chunk, vector<uint8_t> &select)
     LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
     return rc;
   }
-  if (left_column.attr_type() != right_column.attr_type()) {
-    LOG_WARN("cannot compare columns with different types");
-    return RC::INTERNAL;
-  }
+  // 允许不同类型的比较，在运行时处理
+  // if (left_column.attr_type() != right_column.attr_type()) {
+  //   LOG_WARN("cannot compare columns with different types");
+  //   return RC::INTERNAL;
+  // }
   if (left_column.attr_type() == AttrType::INTS) {
     rc = compare_column<int>(left_column, right_column, select);
   } else if (left_column.attr_type() == AttrType::FLOATS) {
