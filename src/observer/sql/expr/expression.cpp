@@ -197,18 +197,23 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
 {
   Value left_value;
   Value right_value;
-
+  
   RC rc = left_->get_value(tuple, left_value);
+  // 删除调试printf语句
   if (rc != RC::SUCCESS) {
-    LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
+    // 删除调试printf语句
     return rc;
   }
+  
   rc = right_->get_value(tuple, right_value);
+  // 删除调试printf语句
   if (rc != RC::SUCCESS) {
-    LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
+    // 删除调试printf语句
     return rc;
   }
-
+  
+  // 删除调试printf语句
+  
   bool bool_value = false;
 
   rc = compare_value(left_value, right_value, bool_value);

@@ -44,7 +44,7 @@ RC NestedLoopJoinPhysicalOperator::next()
 {
   static int call_count = 0;
   call_count++;
-  printf(">>> NLJ::next called, count=%d\n", call_count);
+  // 删除调试printf语句
   
   RC   rc             = RC::SUCCESS;
   while (RC::SUCCESS == rc) {
@@ -75,7 +75,7 @@ RC NestedLoopJoinPhysicalOperator::next()
     }
 
     // ⭐ 只组合tuple，不检查条件，条件检查交给上层的Predicate算子
-    printf(">>> NLJ::next returning a tuple\n");
+    // 删除调试printf语句
     break; // 找到记录
   }
   return rc;

@@ -170,7 +170,10 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
   RC                                  rc = RC::SUCCESS;
   vector<unique_ptr<Expression>> cmp_exprs;
   const vector<FilterUnit *>    &filter_units = filter_stmt->filter_units();
-  for (const FilterUnit *filter_unit : filter_units) {
+  
+  for (size_t i = 0; i < filter_units.size(); i++) {
+    const FilterUnit *filter_unit = filter_units[i];
+    
     const FilterObj &filter_obj_left  = filter_unit->left();
     const FilterObj &filter_obj_right = filter_unit->right();
 
@@ -185,6 +188,7 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
     if (left->value_type() != right->value_type()) {
       auto left_to_right_cost = implicit_cast_cost(left->value_type(), right->value_type());
       auto right_to_left_cost = implicit_cast_cost(right->value_type(), left->value_type());
+      
       if (left_to_right_cost <= right_to_left_cost && left_to_right_cost != INT32_MAX) {
         ExprType left_type = left->type();
         auto cast_expr = make_unique<CastExpr>(std::move(left), right->value_type());
@@ -215,9 +219,8 @@ RC LogicalPlanGenerator::create_plan(FilterStmt *filter_stmt, unique_ptr<Logical
         }
 
       } else {
-        rc = RC::UNSUPPORTED;
-        LOG_WARN("unsupported cast from %s to %s", attr_type_to_string(left->value_type()), attr_type_to_string(right->value_type()));
-        return rc;
+        // ⭐ 修改这里：不返回错误，允许运行时比较
+        // 不做任何转换，让 ComparisonExpr 在运行时通过 Value::compare 处理
       }
     }
 

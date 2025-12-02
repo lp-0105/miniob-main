@@ -18,6 +18,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/sys/rc.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
+#include <stdio.h>
 
 FilterStmt::~FilterStmt()
 {
@@ -34,20 +35,21 @@ RC FilterStmt::create(Db *db, Table *default_table, unordered_map<string, Table 
   stmt  = nullptr;
 
   FilterStmt *tmp_stmt = new FilterStmt();
+  
   for (int i = 0; i < condition_num; i++) {
     FilterUnit *filter_unit = nullptr;
-
     rc = create_filter_unit(db, default_table, tables, conditions[i], filter_unit);
+    
     if (rc != RC::SUCCESS) {
       delete tmp_stmt;
-      LOG_WARN("failed to create filter unit. condition index=%d", i);
       return rc;
     }
+    
     tmp_stmt->filter_units_.push_back(filter_unit);
   }
 
   stmt = tmp_stmt;
-  return rc;
+  return RC::SUCCESS;
 }
 
 RC get_table_and_field(Db *db, Table *default_table, unordered_map<string, Table *> *tables,
@@ -91,6 +93,7 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
 
   filter_unit = new FilterUnit;
 
+  // 处理左表达式
   if (condition.left_is_attr) {
     Table           *table = nullptr;
     const FieldMeta *field = nullptr;
@@ -108,6 +111,7 @@ RC FilterStmt::create_filter_unit(Db *db, Table *default_table, unordered_map<st
     filter_unit->set_left(filter_obj);
   }
 
+  // 处理右表达式
   if (condition.right_is_attr) {
     Table           *table = nullptr;
     const FieldMeta *field = nullptr;

@@ -37,28 +37,35 @@ RC PredicatePhysicalOperator::open(Trx *trx)
 
 RC PredicatePhysicalOperator::next()
 {
-  RC                rc   = RC::SUCCESS;
-  PhysicalOperator *oper = children_.front().get();
-
-  while (RC::SUCCESS == (rc = oper->next())) {
-    Tuple *tuple = oper->current_tuple();
+  RC rc = RC::SUCCESS;
+  
+  while (RC::SUCCESS == (rc = children_[0]->next())) {
+    Tuple *tuple = children_[0]->current_tuple();
     if (nullptr == tuple) {
+      // 删除调试printf语句
       rc = RC::INTERNAL;
-      LOG_WARN("failed to get tuple from operator");
       break;
     }
 
     Value value;
     rc = expression_->get_value(*tuple, value);
+    
+    // 删除调试printf语句
+    
     if (rc != RC::SUCCESS) {
-      return rc;
+      // 删除调试printf语句
+      return rc;  // ⭐ 这里可能返回错误
     }
 
-    if (value.get_boolean()) {
-      return rc;
+    bool match = value.get_boolean();
+    // 删除调试printf语句
+    
+    if (match) {
+      return RC::SUCCESS;
     }
   }
   
+  // 删除调试printf语句
   return rc;
 }
 

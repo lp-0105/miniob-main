@@ -20,6 +20,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/table/table.h"
 #include "sql/parser/expression_binder.h"
 #include "sql/operator/join_physical_operator.h"
+#include <stdio.h>
 
 using namespace std;
 using namespace common;
@@ -218,6 +219,9 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     delete filter_stmt;
     filter_stmt = nullptr;
   }
+
+  // 添加详细日志
+  // 删除调试printf语句
   
   rc = FilterStmt::create(db,
       default_table,
@@ -225,6 +229,8 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
       all_conditions.data(),
       static_cast<int>(all_conditions.size()),
       filter_stmt);
+
+  // 删除调试printf语句
   
   if (rc != RC::SUCCESS) {
     LOG_WARN("cannot construct filter stmt with join conditions");
