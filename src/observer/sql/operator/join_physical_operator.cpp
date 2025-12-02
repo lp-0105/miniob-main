@@ -116,18 +116,30 @@ bool NestedLoopJoinPhysicalOperator::check_join_conditions()
   for (const auto &condition : join_conditions_) {
     Value left_value, right_value;
     
-    // 获取左表字段值
-    RC rc = left_tuple_->find_cell(TupleCellSpec(condition.left_table.c_str(), condition.left_field.c_str()), left_value);
-    if (rc != RC::SUCCESS) {
-      LOG_WARN("Failed to find left field %s.%s", condition.left_table.c_str(), condition.left_field.c_str());
-      return false;
+    // 获取左值
+    if (condition.left_is_attr) {
+      // 左值是字段
+      RC rc = left_tuple_->find_cell(TupleCellSpec(condition.left_table.c_str(), condition.left_field.c_str()), left_value);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("Failed to find left field %s.%s", condition.left_table.c_str(), condition.left_field.c_str());
+        return false;
+      }
+    } else {
+      // 左值是常量
+      left_value = condition.left_value;
     }
     
-    // 获取右表字段值
-    rc = right_tuple_->find_cell(TupleCellSpec(condition.right_table.c_str(), condition.right_field.c_str()), right_value);
-    if (rc != RC::SUCCESS) {
-      LOG_WARN("Failed to find right field %s.%s", condition.right_table.c_str(), condition.right_field.c_str());
-      return false;
+    // 获取右值
+    if (condition.right_is_attr) {
+      // 右值是字段
+      RC rc = right_tuple_->find_cell(TupleCellSpec(condition.right_table.c_str(), condition.right_field.c_str()), right_value);
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("Failed to find right field %s.%s", condition.right_table.c_str(), condition.right_field.c_str());
+        return false;
+      }
+    } else {
+      // 右值是常量
+      right_value = condition.right_value;
     }
     
     // 比较两个值

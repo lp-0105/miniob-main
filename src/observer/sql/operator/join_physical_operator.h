@@ -16,17 +16,24 @@ See the Mulan PSL v2 for more details. */
 
 #include "sql/operator/physical_operator.h"
 #include "sql/parser/parse.h"
+#include "common/value.h"
 
 /**
  * @brief JOIN条件结构体
- * @details 描述两个表之间的连接条件
+ * @details 描述两个表之间的连接条件，支持字段和常量值
  */
 struct JoinCondition {
-  std::string left_table;   ///< 左表名
-  std::string left_field;   ///< 左表字段名
-  std::string right_table;  ///< 右表名
-  std::string right_field;  ///< 右表字段名
-  CompOp comp;              ///< 比较操作符
+  bool left_is_attr = true;       ///< 左边是否是字段（true=字段，false=常量值）
+  std::string left_table;         ///< 左表名（当 left_is_attr = true 时有效）
+  std::string left_field;         ///< 左表字段名（当 left_is_attr = true 时有效）
+  Value left_value;               ///< 左边的常量值（当 left_is_attr = false 时有效）
+  
+  CompOp comp;                    ///< 比较操作符
+  
+  bool right_is_attr = true;      ///< 右边是否是字段（true=字段，false=常量值）
+  std::string right_table;        ///< 右表名（当 right_is_attr = true 时有效）
+  std::string right_field;        ///< 右表字段名（当 right_is_attr = true 时有效）
+  Value right_value;              ///< 右边的常量值（当 right_is_attr = false 时有效）
 };
 
 /**

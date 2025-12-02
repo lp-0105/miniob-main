@@ -304,62 +304,38 @@ RC PhysicalPlanGenerator::create_plan(ExplainLogicalOperator &explain_oper, uniq
   return rc;
 }
 
-RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, unique_ptr<PhysicalOperator> &oper, Session* session)
-{
-  RC rc = RC::SUCCESS;
+RC PhysicalPlanGenerator::create_plan(JoinLogicalOperator &join_oper, 
+                                        unique_ptr<PhysicalOperator> &oper, 
+                                        Session* session) 
+{ 
+  RC rc = RC::SUCCESS; 
 
-  vector<unique_ptr<LogicalOperator>> &child_opers = join_oper.children();
-  if (child_opers.size() != 2) {
-    LOG_WARN("join operator should have 2 children, but have %d", child_opers.size());
-    return RC::INTERNAL;
-  }
-  
-  // 获取JOIN条件并转换为JoinCondition结构体
-  vector<JoinCondition> join_conditions;
-  vector<unique_ptr<Expression>> &join_predicates = join_oper.get_join_predicates();
-  
-  for (auto &predicate : join_predicates) {
-    if (predicate->type() == ExprType::COMPARISON) {
-      auto comparison_expr = static_cast<ComparisonExpr *>(predicate.get());
-      
-      // 检查是否为字段之间的比较
-      unique_ptr<Expression> &left_expr = comparison_expr->left();
-      unique_ptr<Expression> &right_expr = comparison_expr->right();
-      
-      if (left_expr->type() == ExprType::FIELD && right_expr->type() == ExprType::FIELD) {
-        auto left_field_expr = static_cast<FieldExpr *>(left_expr.get());
-        auto right_field_expr = static_cast<FieldExpr *>(right_expr.get());
-        
-        JoinCondition condition;
-        condition.left_table = left_field_expr->table_name() ? left_field_expr->table_name() : "";
-        condition.left_field = left_field_expr->field_name();
-        condition.right_table = right_field_expr->table_name() ? right_field_expr->table_name() : "";
-        condition.right_field = right_field_expr->field_name();
-        condition.comp = comparison_expr->comp();
-        
-        join_conditions.push_back(condition);
-      }
-    }
-  }
-  
-  if (session->hash_join_on() && can_use_hash_join(join_oper)) {
-    // your code here
-  } else {
-    unique_ptr<PhysicalOperator> join_physical_oper(new NestedLoopJoinPhysicalOperator(join_conditions));
-    for (auto &child_oper : child_opers) {
-      unique_ptr<PhysicalOperator> child_physical_oper;
-      rc = create(*child_oper, child_physical_oper, session);
-      if (rc != RC::SUCCESS) {
-        LOG_WARN("failed to create physical child oper. rc=%s", strrc(rc));
-        return rc;
-      }
+  vector<unique_ptr<LogicalOperator>> &child_opers = join_oper.children(); 
+  if (child_opers.size() != 2) { 
+    LOG_WARN("join operator should have 2 children, but have %d", child_opers.size()); 
+    return RC::INTERNAL; 
+  } 
 
-      join_physical_oper->add_child(std::move(child_physical_oper));
-    }
+  // 1. 创建 JOIN 物理算子（只做笛卡尔积） 
+  unique_ptr<PhysicalOperator> join_physical_oper(new NestedLoopJoinPhysicalOperator()); 
+  
+  for (auto &child_oper : child_opers) { 
+    unique_ptr<PhysicalOperator> child_physical_oper; 
+    rc = create(*child_oper, child_physical_oper, session); 
+    if (rc != RC::SUCCESS) { 
+      LOG_WARN("failed to create physical child oper. rc=%s", strrc(rc)); 
+      return rc; 
+    } 
+    join_physical_oper->add_child(std::move(child_physical_oper)); 
+  } 
 
-    oper = std::move(join_physical_oper);
-  }
-  return rc;
+  // 2. 处理 JOIN 条件 
+  // 注意：JOIN条件已经在LogicalPlanGenerator中被添加到JoinLogicalOperator中
+  // 这些条件会在上层的Predicate算子中统一处理，避免重复创建Predicate算子
+  
+  oper = std::move(join_physical_oper); 
+
+  return rc; 
 }
 
 bool PhysicalPlanGenerator::can_use_hash_join(JoinLogicalOperator &join_oper)

@@ -212,7 +212,10 @@ public:
   {
     const char *table_name = spec.table_name();
     const char *field_name = spec.field_name();
-    if (0 != strcmp(table_name, table_->name())) {
+    
+    // 如果指定了表名且与当前表名不匹配，则返回NOTFOUND
+    // 如果表名为空（空字符串），则只通过字段名查找
+    if (table_name != nullptr && table_name[0] != '\0' && 0 != strcmp(table_name, table_->name())) {
       return RC::NOTFOUND;
     }
 

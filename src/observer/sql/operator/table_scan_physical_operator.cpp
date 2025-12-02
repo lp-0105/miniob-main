@@ -12,6 +12,8 @@ See the Mulan PSL v2 for more details. */
 // Created by WangYunlai on 2021/6/9.
 //
 
+#include <stdio.h>
+
 #include "sql/operator/table_scan_physical_operator.h"
 #include "event/sql_debug.h"
 #include "storage/table/table.h"
@@ -20,7 +22,14 @@ using namespace std;
 
 RC TableScanPhysicalOperator::open(Trx *trx)
 {
+  if (record_scanner_ != nullptr) {
+    record_scanner_->close_scan();
+    delete record_scanner_;
+    record_scanner_ = nullptr;
+  }
+
   RC rc = table_->get_record_scanner(record_scanner_, trx, mode_);
+  
   if (rc == RC::SUCCESS) {
     tuple_.set_schema(table_, table_->table_meta().field_metas());
   }
@@ -31,10 +40,9 @@ RC TableScanPhysicalOperator::open(Trx *trx)
 RC TableScanPhysicalOperator::next()
 {
   RC rc = RC::SUCCESS;
-
   bool filter_result = false;
+
   while (OB_SUCC(rc = record_scanner_->next(current_record_))) {
-    LOG_TRACE("got a record. rid=%s", current_record_.rid().to_string().c_str());
     
     tuple_.set_record(&current_record_);
     rc = filter(tuple_, filter_result);
@@ -50,6 +58,7 @@ RC TableScanPhysicalOperator::next()
       sql_debug("a tuple is filtered: %s", tuple_.to_string().c_str());
     }
   }
+
   return rc;
 }
 

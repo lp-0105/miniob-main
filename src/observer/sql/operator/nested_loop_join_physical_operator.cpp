@@ -12,14 +12,15 @@ See the Mulan PSL v2 for more details. */
 // Created by WangYunlai on 2022/12/30.
 //
 
+#include <stdio.h>
+
 #include "sql/operator/nested_loop_join_physical_operator.h"
 #include "storage/field/field.h"
 #include "common/log/log.h"
 
-NestedLoopJoinPhysicalOperator::NestedLoopJoinPhysicalOperator() = default;
-
-NestedLoopJoinPhysicalOperator::NestedLoopJoinPhysicalOperator(const std::vector<JoinConditionSqlNode> &join_conditions)
-    : join_conditions_(join_conditions) {}
+NestedLoopJoinPhysicalOperator::NestedLoopJoinPhysicalOperator()
+{
+}
 
 RC NestedLoopJoinPhysicalOperator::open(Trx *trx)
 {
@@ -41,6 +42,10 @@ RC NestedLoopJoinPhysicalOperator::open(Trx *trx)
 
 RC NestedLoopJoinPhysicalOperator::next()
 {
+  static int call_count = 0;
+  call_count++;
+  printf(">>> NLJ::next called, count=%d\n", call_count);
+  
   RC   rc             = RC::SUCCESS;
   while (RC::SUCCESS == rc) {
     bool left_need_step = (left_tuple_ == nullptr);
@@ -69,12 +74,9 @@ RC NestedLoopJoinPhysicalOperator::next()
       }
     }
 
-    // 检查JOIN条件是否满足
-    if (!check_join_conditions()) {
-      continue; // 条件不满足，继续下一轮
-    }
-
-    break; // 找到满足条件的记录
+    // ⭐ 只组合tuple，不检查条件，条件检查交给上层的Predicate算子
+    printf(">>> NLJ::next returning a tuple\n");
+    break; // 找到记录
   }
   return rc;
 }
@@ -147,65 +149,4 @@ RC NestedLoopJoinPhysicalOperator::right_next()
   return rc;
 }
 
-bool NestedLoopJoinPhysicalOperator::check_join_conditions()
-{
-  if (join_conditions_.empty()) {
-    return true; // 没有JOIN条件，直接返回true
-  }
 
-  if (left_tuple_ == nullptr || right_tuple_ == nullptr) {
-    return false; // 缺少tuple，条件不满足
-  }
-
-  for (const JoinConditionSqlNode &condition : join_conditions_) {
-    // 获取左表字段值
-    Value left_value;
-    RC rc = left_tuple_->find_cell(TupleCellSpec(condition.left_relation.c_str(), condition.left_attribute.c_str()), left_value);
-    if (rc != RC::SUCCESS) {
-      LOG_WARN("failed to find left field: table=%s, field=%s", 
-               condition.left_relation.c_str(), condition.left_attribute.c_str());
-      return false;
-    }
-
-    // 获取右表字段值
-    Value right_value;
-    rc = right_tuple_->find_cell(TupleCellSpec(condition.right_relation.c_str(), condition.right_attribute.c_str()), right_value);
-    if (rc != RC::SUCCESS) {
-      LOG_WARN("failed to find right field: table=%s, field=%s", 
-               condition.right_relation.c_str(), condition.right_attribute.c_str());
-      return false;
-    }
-
-    // 比较字段值
-    bool condition_satisfied = false;
-    switch (condition.comp) {
-      case CompOp::EQUAL_TO:
-        condition_satisfied = (left_value.compare(right_value) == 0);
-        break;
-      case CompOp::LESS_EQUAL:
-        condition_satisfied = (left_value.compare(right_value) <= 0);
-        break;
-      case CompOp::NOT_EQUAL:
-        condition_satisfied = (left_value.compare(right_value) != 0);
-        break;
-      case CompOp::LESS_THAN:
-        condition_satisfied = (left_value.compare(right_value) < 0);
-        break;
-      case CompOp::GREAT_EQUAL:
-        condition_satisfied = (left_value.compare(right_value) >= 0);
-        break;
-      case CompOp::GREAT_THAN:
-        condition_satisfied = (left_value.compare(right_value) > 0);
-        break;
-      default:
-        LOG_WARN("unsupported comparison operator: %d", condition.comp);
-        return false;
-    }
-
-    if (!condition_satisfied) {
-      return false; // 有一个条件不满足就返回false
-    }
-  }
-
-  return true; // 所有条件都满足
-}

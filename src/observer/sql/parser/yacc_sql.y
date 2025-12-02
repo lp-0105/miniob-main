@@ -701,33 +701,39 @@ join_condition_list:
 join_condition:
     rel_attr comp_op rel_attr {
       $$ = new JoinConditionSqlNode();
+      $$->left_is_attr = 1;           // ⭐ 左边是字段
       $$->left_relation = $1->relation_name;
       $$->left_attribute = $1->attribute_name;
+      $$->comp = $2;
+      $$->right_is_attr = 1;          // ⭐ 右边是字段
       $$->right_relation = $3->relation_name;
       $$->right_attribute = $3->attribute_name;
-      $$->comp = $2;
       delete $1;
       delete $3;
     }
     | rel_attr comp_op value {
       $$ = new JoinConditionSqlNode();
+      $$->left_is_attr = 1;           // ⭐ 左边是字段
       $$->left_relation = $1->relation_name;
       $$->left_attribute = $1->attribute_name;
+      $$->comp = $2;
+      $$->right_is_attr = 0;          // ⭐ 右边是常量值
       $$->right_relation = ""; // 常量条件没有右表
       $$->right_attribute = ""; // 常量条件没有右字段
       $$->right_value = *$3; // 存储常量值
-      $$->comp = $2;
       delete $1;
       delete $3;
     }
     | value comp_op rel_attr {
       $$ = new JoinConditionSqlNode();
+      $$->left_is_attr = 0;           // ⭐ 左边是常量值
       $$->left_relation = ""; // 常量条件没有左表
       $$->left_attribute = ""; // 常量条件没有左字段
       $$->left_value = *$1; // 存储常量值
+      $$->comp = $2;
+      $$->right_is_attr = 1;          // ⭐ 右边是字段
       $$->right_relation = $3->relation_name;
       $$->right_attribute = $3->attribute_name;
-      $$->comp = $2;
       delete $1;
       delete $3;
     }

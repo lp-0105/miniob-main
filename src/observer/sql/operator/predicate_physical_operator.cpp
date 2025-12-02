@@ -12,6 +12,8 @@ See the Mulan PSL v2 for more details. */
 // Created by WangYunlai on 2022/6/27.
 //
 
+#include <stdio.h>
+
 #include "sql/operator/predicate_physical_operator.h"
 #include "common/log/log.h"
 #include "sql/stmt/filter_stmt.h"
@@ -56,6 +58,7 @@ RC PredicatePhysicalOperator::next()
       return rc;
     }
   }
+  
   return rc;
 }
 

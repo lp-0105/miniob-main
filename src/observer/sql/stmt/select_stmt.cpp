@@ -85,7 +85,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     }
 
     binder_context.add_table(table);
-    tables.push_back(table);
+    // tables.push_back(table);  // ⭐ 注释掉这行！JOIN表不要加到tables中
     table_map.insert({table_name, table});
 
     JoinTable join_table;
@@ -93,26 +93,47 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
     // process join conditions
     for (const auto &join_condition_sql : join_table_sql.join_conditions) {
+      
       JoinCondition join_condition;
       join_condition.comp = join_condition_sql.comp;
 
-      // find left table and field
-      auto left_table_it = table_map.find(join_condition_sql.left_relation);
-      if (left_table_it == table_map.end()) {
-        LOG_WARN("left table not found in join condition: %s", join_condition_sql.left_relation.c_str());
-        return RC::SCHEMA_TABLE_NOT_EXIST;
+      // 处理左操作数
+      if (join_condition_sql.left_is_attr) {
+        // 左操作数是字段
+        join_condition.left_is_attr = 1;
+        join_condition.left_table = join_condition_sql.left_relation;
+        join_condition.left_field = join_condition_sql.left_attribute;
+        
+        // 验证左表是否存在
+        auto left_table_it = table_map.find(join_condition_sql.left_relation);
+        if (left_table_it == table_map.end()) {
+          LOG_WARN("left table not found in join condition: %s", join_condition_sql.left_relation.c_str());
+          return RC::SCHEMA_TABLE_NOT_EXIST;
+        }
+      } else {
+        // 左操作数是常量值
+        join_condition.left_is_attr = 0;
+        join_condition.left_value = join_condition_sql.left_value;
       }
-      join_condition.left_table = join_condition_sql.left_relation;
-      join_condition.left_field = join_condition_sql.left_attribute;
 
-      // find right table and field
-      auto right_table_it = table_map.find(join_condition_sql.right_relation);
-      if (right_table_it == table_map.end()) {
-        LOG_WARN("right table not found in join condition: %s", join_condition_sql.right_relation.c_str());
-        return RC::SCHEMA_TABLE_NOT_EXIST;
+      // 处理右操作数
+      if (join_condition_sql.right_is_attr) {
+        // 右操作数是字段
+        join_condition.right_is_attr = 1;
+        join_condition.right_table = join_condition_sql.right_relation;
+        join_condition.right_field = join_condition_sql.right_attribute;
+        
+        // 验证右表是否存在
+        auto right_table_it = table_map.find(join_condition_sql.right_relation);
+        if (right_table_it == table_map.end()) {
+          LOG_WARN("right table not found in join condition: %s", join_condition_sql.right_relation.c_str());
+          return RC::SCHEMA_TABLE_NOT_EXIST;
+        }
+      } else {
+        // 右操作数是常量值
+        join_condition.right_is_attr = 0;
+        join_condition.right_value = join_condition_sql.right_value;
       }
-      join_condition.right_table = join_condition_sql.right_relation;
-      join_condition.right_field = join_condition_sql.right_attribute;
 
       join_table.join_conditions.push_back(join_condition);
     }
@@ -168,26 +189,22 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
       ConditionSqlNode condition;
       condition.comp = join_condition_sql.comp;
       
-      // 处理左操作数
-      if (!join_condition_sql.left_relation.empty() && !join_condition_sql.left_attribute.empty()) {
-        // 左操作数是字段
+      // 处理左操作数 - 使用 left_is_attr 标志位判断
+      if (join_condition_sql.left_is_attr) {
         condition.left_is_attr = 1;
         condition.left_attr.relation_name = join_condition_sql.left_relation;
         condition.left_attr.attribute_name = join_condition_sql.left_attribute;
       } else {
-        // 左操作数是常量值
         condition.left_is_attr = 0;
         condition.left_value = join_condition_sql.left_value;
       }
       
-      // 处理右操作数
-      if (!join_condition_sql.right_relation.empty() && !join_condition_sql.right_attribute.empty()) {
-        // 右操作数是字段
+      // 处理右操作数 - 使用 right_is_attr 标志位判断
+      if (join_condition_sql.right_is_attr) {
         condition.right_is_attr = 1;
         condition.right_attr.relation_name = join_condition_sql.right_relation;
         condition.right_attr.attribute_name = join_condition_sql.right_attribute;
       } else {
-        // 右操作数是常量值
         condition.right_is_attr = 0;
         condition.right_value = join_condition_sql.right_value;
       }
@@ -208,6 +225,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
       all_conditions.data(),
       static_cast<int>(all_conditions.size()),
       filter_stmt);
+  
   if (rc != RC::SUCCESS) {
     LOG_WARN("cannot construct filter stmt with join conditions");
     return rc;
