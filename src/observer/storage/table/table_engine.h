@@ -53,6 +53,8 @@ public:
   virtual RC     sync()                                                                      = 0;
   virtual Index *find_index(const char *index_name) const                                    = 0;
   virtual Index *find_index_by_field(const char *field_name) const                           = 0;
+  // 新增：根据多个字段名查找索引
+  virtual Index *find_index_by_fields(const std::vector<std::string> &field_names) const     = 0;
   virtual RC     open()                                                                      = 0;
   // TODO: remove this function
   virtual RC init() = 0;

@@ -42,6 +42,7 @@ public:
 
   Index *find_index(const char *index_name) const override;
   Index *find_index_by_field(const char *field_name) const override;
+  Index *find_index_by_fields(const std::vector<std::string> &field_names) const override;
   RC     open() override;
   // init_record_handler
   RC init() override;

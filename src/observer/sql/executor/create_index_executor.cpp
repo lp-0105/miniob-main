@@ -22,15 +22,31 @@ See the Mulan PSL v2 for more details. */
 
 RC CreateIndexExecutor::execute(SQLStageEvent *sql_event)
 {
-  Stmt    *stmt    = sql_event->stmt();
-  Session *session = sql_event->session_event()->session();
-  ASSERT(stmt->type() == StmtType::CREATE_INDEX,
-      "create index executor can not run this command: %d",
-      static_cast<int>(stmt->type()));
-
-  CreateIndexStmt *create_index_stmt = static_cast<CreateIndexStmt *>(stmt);
-
-  Trx   *trx   = session->current_trx();
-  Table *table = create_index_stmt->table();
-  return table->create_index(trx, create_index_stmt->field_metas(), create_index_stmt->index_name().c_str());
+  CreateIndexStmt *stmt = static_cast<CreateIndexStmt *>(sql_event->stmt());
+  
+  Table *table = stmt->table();
+  const std::vector<std::string> &attr_names = stmt->attribute_names();
+  const char *index_name = stmt->index_name().c_str();
+  
+  // 1. 获取所有字段的FieldMeta 
+  std::vector<const FieldMeta *> field_metas;
+  for (const std::string &attr_name : attr_names) {
+    const FieldMeta *field_meta = table->table_meta().field(attr_name.c_str());
+    if (field_meta == nullptr) {
+      LOG_WARN("Field not found. table=%s, field=%s", table->name(), attr_name.c_str());
+      return RC::SCHEMA_FIELD_NOT_EXIST;
+    }
+    field_metas.push_back(field_meta);
+  }
+  
+  // 2. 调用表的创建索引方法（支持多字段）
+  Trx *trx = sql_event->session_event()->session()->current_trx();
+  RC rc = table->create_index(trx, field_metas, index_name);
+  
+  if (rc != RC::SUCCESS) {
+    LOG_WARN("Failed to create index. table=%s, index=%s, rc=%s",
+             table->name(), index_name, strrc(rc));
+  }
+  
+  return rc;
 }

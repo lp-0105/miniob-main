@@ -47,6 +47,7 @@ public:
   RC     sync() override { return RC::SUCCESS; }
   Index *find_index(const char *index_name) const override { return nullptr; }
   Index *find_index_by_field(const char *field_name) const override { return nullptr; }
+  Index *find_index_by_fields(const std::vector<std::string> &field_names) const override { return nullptr; }
   RC     open() override;
   RC     init() override { return RC::UNIMPLEMENTED; }
 

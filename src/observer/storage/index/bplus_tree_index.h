@@ -45,6 +45,9 @@ public:
 private:
   // ⭐ 构造复合键
   void make_key(const char *record, char *key) const;
+  
+  // 新增：获取复合键总长度
+  int total_key_length() const;
 
 private:
   bool             inited_ = false;

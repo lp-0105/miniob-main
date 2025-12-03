@@ -15,11 +15,11 @@ See the Mulan PSL v2 for more details. */
 #pragma once
 
 #include "sql/stmt/stmt.h"
+#include "storage/field/field_meta.h"
 #include <vector>
 
 struct CreateIndexSqlNode;
 class Table;
-class FieldMeta;
 
 /**
  * @brief 创建索引的语句
@@ -39,6 +39,15 @@ public:
   Table           *table() const { return table_; }
   const std::vector<const FieldMeta *> &field_metas() const { return field_metas_; }
   const string    &index_name() const { return index_name_; }
+  
+  // 获取字段名列表（用于多字段索引支持）
+  std::vector<std::string> attribute_names() const {
+    std::vector<std::string> names;
+    for (const FieldMeta *field_meta : field_metas_) {
+      names.push_back(field_meta->name());
+    }
+    return names;
+  }
 
 public:
   static RC create(Db *db, const CreateIndexSqlNode &create_index, Stmt *&stmt);

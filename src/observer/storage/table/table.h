@@ -130,6 +130,7 @@ private:
 public:
   Index *find_index(const char *index_name) const;
   Index *find_index_by_field(const char *field_name) const;
+  Index *find_index_by_fields(const std::vector<std::string> &field_names) const;
 
 private:
   Db       *db_ = nullptr;

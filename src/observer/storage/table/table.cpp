@@ -293,6 +293,11 @@ Index *Table::find_index_by_field(const char *field_name) const
   return engine_->find_index_by_field(field_name);
 }
 
+Index *Table::find_index_by_fields(const std::vector<std::string> &field_names) const
+{
+  return engine_->find_index_by_fields(field_names);
+}
+
 RC Table::sync()
 {
   return engine_->sync();

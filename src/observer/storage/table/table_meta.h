@@ -58,8 +58,12 @@ public:
 
   const IndexMeta *index(const char *name) const;
   const IndexMeta *find_index_by_field(const char *field) const;
+  // 新增：根据多个字段名查找索引
+  const IndexMeta *find_index_by_fields(const std::vector<std::string> &field_names) const;
   const IndexMeta *index(int i) const;
   int              index_num() const;
+  // 新增：根据索引名查找索引
+  const IndexMeta *find_index_by_name(const char *name) const;
 
   const vector<string> &primary_keys() const { return primary_keys_; }
 
