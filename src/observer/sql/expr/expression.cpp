@@ -19,6 +19,45 @@ See the Mulan PSL v2 for more details. */
 
 using namespace std;
 
+/**
+ * LIKE 模式匹配
+ * % 匹配零个或多个任意字符
+ * _ 匹配一个任意字符
+ */
+static bool like_match(const char *pattern, const char *str)
+{
+  const char *p = pattern;
+  const char *s = str;
+  const char *star_p = nullptr;  // 记录最近的 % 位置
+  const char *star_s = nullptr;  // 记录 % 匹配时 str 的位置
+
+  while (*s != '\0') {
+    if (*p == '%') {
+      // 记录 % 的位置，尝试匹配0个字符
+      star_p = p++;
+      star_s = s;
+    } else if (*p == '_' || *p == *s) {
+      // _ 匹配任意单个字符，或者字符相等
+      p++;
+      s++;
+    } else if (star_p != nullptr) {
+      // 当前字符不匹配，但之前有 %，回溯
+      p = star_p + 1;
+      s = ++star_s;
+    } else {
+      // 不匹配且没有 % 可以回溯
+      return false;
+    }
+  }
+
+  // 跳过末尾的所有 %
+  while (*p == '%') {
+    p++;
+  }
+
+  return *p == '\0';
+}
+
 RC FieldExpr::get_value(const Tuple &tuple, Value &value) const
 {
   return tuple.find_cell(TupleCellSpec(table_name(), field_name()), value);
@@ -143,6 +182,33 @@ ComparisonExpr::~ComparisonExpr() {}
 RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &result) const
 {
   RC  rc         = RC::SUCCESS;
+  
+  // 添加 LIKE 处理
+  if (comp_ == LIKE_OP || comp_ == NOT_LIKE_OP) {
+    // LIKE 只处理字符串类型
+    if (left.attr_type() != AttrType::CHARS || right.attr_type() != AttrType::CHARS) {
+      return RC::INVALID_ARGUMENT;
+    }
+    
+    std::string str_val = left.get_string();
+    std::string pattern_val = right.get_string();
+    
+    // 去除尾部空格
+    while (!str_val.empty() && str_val.back() == ' ') {
+      str_val.pop_back();
+    }
+    while (!pattern_val.empty() && pattern_val.back() == ' ') {
+      pattern_val.pop_back();
+    }
+    
+    const char *str = str_val.c_str();
+    const char *pattern = pattern_val.c_str();
+    
+    bool match = like_match(pattern, str);
+    result = (comp_ == LIKE_OP) ? match : !match;
+    return RC::SUCCESS;
+  }
+  
   int cmp_result = left.compare(right);
   
   // 检查是否是无效日期（返回 INT_MIN）
