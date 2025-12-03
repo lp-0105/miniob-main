@@ -124,6 +124,10 @@ void Value::set_data(char *data, int length)
       value_.float_value_ = *(float *)data;
       length_             = length;
     } break;
+    case AttrType::DATES: {  // ⭐ 新增
+      value_.int_value_ = *(int *)data;
+      length_           = length;
+    } break;
     case AttrType::BOOLEANS: {
       value_.bool_value_ = *(int *)data != 0;
       length_            = length;
@@ -203,6 +207,9 @@ void Value::set_value(const Value &value)
     case AttrType::CHARS: {
       set_string(value.get_string().c_str());
     } break;
+    case AttrType::DATES: {  // ⭐ 新增
+      set_date(value.get_date());
+    } break;
     case AttrType::BOOLEANS: {
       set_boolean(value.get_boolean());
     } break;
@@ -263,6 +270,9 @@ int Value::get_int() const
     }
     case AttrType::FLOATS: {
       return (int)(value_.float_value_);
+    }
+    case AttrType::DATES: {  // ⭐ 添加这个！
+      return value_.int_value_;
     }
     case AttrType::BOOLEANS: {
       return (int)(value_.bool_value_);
@@ -348,4 +358,55 @@ bool Value::get_boolean() const
     }
   }
   return false;
+}
+
+// ⭐ 日期相关函数
+
+// 判断日期是否合法
+bool Value::is_valid_date(int year, int month, int day)
+{
+  if (year < 1 || year > 9999) return false;
+  if (month < 1 || month > 12) return false;
+  if (day < 1) return false;
+
+  int days_in_month[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  
+  // 闰年判断
+  bool is_leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+  if (is_leap) {
+    days_in_month[2] = 29;
+  }
+  
+  if (day > days_in_month[month]) return false;
+  
+  return true;
+}
+
+// 解析日期字符串 "YYYY-MM-DD"
+bool Value::parse_date(const char *str, int &year, int &month, int &day)
+{
+  if (str == nullptr) return false;
+  
+  int ret = sscanf(str, "%d-%d-%d", &year, &month, &day);
+  if (ret != 3) return false;
+  
+  return is_valid_date(year, month, day);
+}
+
+// 设置日期值
+void Value::set_date(int date_int)
+{
+  reset();
+  attr_type_        = AttrType::DATES;
+  value_.int_value_ = date_int;
+  length_           = sizeof(int);
+}
+
+// 获取日期值
+int Value::get_date() const
+{
+  if (attr_type_ == AttrType::DATES) {
+    return value_.int_value_;
+  }
+  return 0;
 }

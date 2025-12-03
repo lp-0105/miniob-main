@@ -55,6 +55,14 @@ public:
   Value &operator=(const Value &other);
   Value &operator=(Value &&other);
 
+  // 在 public 区域的构造函数部分添加
+  void set_date(int date_int);  // YYYYMMDD 格式
+  int  get_date() const;
+
+  // 静态辅助函数
+  static bool parse_date(const char *str, int &year, int &month, int &day);
+  static bool is_valid_date(int year, int month, int day);
+
   void reset();
 
   static RC add(const Value &left, const Value &right, Value &result)
