@@ -45,22 +45,15 @@ int DateType::compare(const Value &left, const Value &right) const
 {
   int left_val = 0, right_val = 0;
   
-  printf("=== DateType::compare ===\n");
-  printf("left type=%d, right type=%d\n", (int)left.attr_type(), (int)right.attr_type());
-  
   // 处理左值
   if (left.attr_type() == AttrType::DATES) {
     left_val = left.get_int();
-    printf("LEFT DATES: %d\n", left_val);
   } else if (left.attr_type() == AttrType::CHARS) {
     int year, month, day;
     std::string str = left.get_string();
-    printf("LEFT CHARS: [%s]\n", str.c_str());
     if (DateType::parse_date(str.c_str(), year, month, day)) {
       left_val = DateType::date_to_int(year, month, day);
-      printf("LEFT parsed: %d\n", left_val);
     } else {
-      printf("LEFT parse FAILED!\n");
       return -1;
     }
   } else {
@@ -70,16 +63,12 @@ int DateType::compare(const Value &left, const Value &right) const
   // 处理右值
   if (right.attr_type() == AttrType::DATES) {
     right_val = right.get_int();
-    printf("RIGHT DATES: %d\n", right_val);
   } else if (right.attr_type() == AttrType::CHARS) {
     int year, month, day;
     std::string str = right.get_string();
-    printf("RIGHT CHARS: [%s]\n", str.c_str());
     if (DateType::parse_date(str.c_str(), year, month, day)) {
       right_val = DateType::date_to_int(year, month, day);
-      printf("RIGHT parsed: %d\n", right_val);
     } else {
-      printf("RIGHT parse FAILED!\n");
       return 1;
     }
   } else {
@@ -89,8 +78,6 @@ int DateType::compare(const Value &left, const Value &right) const
   int result = 0;
   if (left_val < right_val) result = -1;
   else if (left_val > right_val) result = 1;
-  
-  printf("RESULT: %d vs %d = %d\n", left_val, right_val, result);
   
   return result;
 }
@@ -178,6 +165,7 @@ RC DateType::set_value_from_str(Value &val, const string &data) const
   if (!DateType::parse_date(data.c_str(), year, month, day)) {
     return RC::INVALID_ARGUMENT;
   }
+  
   int date_int = DateType::date_to_int(year, month, day);
   val.set_type(AttrType::DATES);
   val.set_data(reinterpret_cast<char *>(&date_int), sizeof(date_int));

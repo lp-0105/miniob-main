@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/stmt/update_stmt.h"
 #include "common/lang/string.h"
 #include "common/log/log.h"
+#include "common/type/data_type.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
 #include "sql/stmt/filter_stmt.h"
@@ -63,19 +64,34 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update, Stmt *&stmt)
     return RC::SCHEMA_FIELD_NOT_EXIST;
   }
 
-  // 检查值的类型是否匹配字段类型
-  const Value &value = update.value;
-  if (value.attr_type() != field_meta->type()) {
-    // 允许一定的类型转换，比如字符串可以转换为整数或浮点数
-    if (value.attr_type() == AttrType::CHARS && 
+  // 检查值的类型是否匹配字段类型，并进行必要的类型转换
+  Value converted_value = update.value;  // 复制一份用于可能的转换
+  
+  if (converted_value.attr_type() != field_meta->type()) {
+    // 字符串转日期
+    if (converted_value.attr_type() == AttrType::CHARS && field_meta->type() == AttrType::DATES) {
+      // 调用 DateType 的转换方法
+      RC rc = DataType::type_instance(AttrType::DATES)->set_value_from_str(converted_value, update.value.get_string());
+      if (rc != RC::SUCCESS) {
+        LOG_WARN("failed to convert string '%s' to date", update.value.get_string().c_str());
+        return rc;
+      }
+    }
+    // 字符串转整数或浮点数
+    else if (converted_value.attr_type() == AttrType::CHARS && 
         (field_meta->type() == AttrType::INTS || field_meta->type() == AttrType::FLOATS)) {
-      // 可以尝试转换
-    } else if (value.attr_type() == AttrType::INTS && field_meta->type() == AttrType::FLOATS) {
+      // 可以尝试转换（保持原有逻辑）
+    }
+    // 整数转浮点数
+    else if (converted_value.attr_type() == AttrType::INTS && field_meta->type() == AttrType::FLOATS) {
       // 整数可以转换为浮点数
-    } else if (value.attr_type() == AttrType::FLOATS && field_meta->type() == AttrType::INTS) {
+    }
+    // 浮点数转整数
+    else if (converted_value.attr_type() == AttrType::FLOATS && field_meta->type() == AttrType::INTS) {
       // 浮点数可以转换为整数（可能丢失精度）
-    } else {
-      LOG_WARN("type mismatch. field_type=%d, value_type=%d", field_meta->type(), value.attr_type());
+    }
+    else {
+      LOG_WARN("type mismatch. field_type=%d, value_type=%d", field_meta->type(), converted_value.attr_type());
       return RC::SCHEMA_FIELD_TYPE_MISMATCH;
     }
   }
@@ -93,7 +109,7 @@ RC UpdateStmt::create(Db *db, const UpdateSqlNode &update, Stmt *&stmt)
 
   // 创建UpdateStmt对象
   Value *values = new Value[1];
-  values[0] = value;
+  values[0] = converted_value;  // 使用转换后的值！
 
   UpdateStmt *update_stmt = new UpdateStmt(table, strdup(attribute_name), values, 1, filter_stmt);
 
