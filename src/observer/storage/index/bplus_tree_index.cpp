@@ -21,11 +21,8 @@ BplusTreeIndex::~BplusTreeIndex() noexcept { close(); }
 
 int BplusTreeIndex::total_key_length() const
 {
-  int total = 0;
-  for (const FieldMeta *field : field_metas_) {
-    total += field->len();
-  }
-  return total;
+  // 直接使用基类计算好的值
+  return key_length_;
 }
 
 RC BplusTreeIndex::create(Table *table, const char *file_name, const IndexMeta &index_meta, const std::vector<const FieldMeta *> &field_metas)
@@ -110,9 +107,10 @@ RC BplusTreeIndex::close()
 void BplusTreeIndex::make_key(const char *record, char *key) const
 {
   int offset = 0;
-  for (const FieldMeta *field : field_metas_) {
-    memcpy(key + offset, record + field->offset(), field->len());
-    offset += field->len();
+  // ⭐ 改为使用引用（因为现在存的是对象而不是指针）
+  for (const FieldMeta &field : field_metas_) {
+    memcpy(key + offset, record + field.offset(), field.len());
+    offset += field.len();
   }
 }
 

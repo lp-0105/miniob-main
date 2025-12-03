@@ -93,7 +93,7 @@ protected:
 
 protected:
   IndexMeta index_meta_;  ///< 索引的元数据
-  std::vector<const FieldMeta *> field_metas_;  ///< 支持多字段索引
+  std::vector<FieldMeta> field_metas_;  ///< 支持多字段索引（存储副本）
   int key_length_ = 0;  ///< 复合键总长度
 };
 

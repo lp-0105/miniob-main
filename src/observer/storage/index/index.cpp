@@ -17,12 +17,15 @@ See the Mulan PSL v2 for more details. */
 RC Index::init(const IndexMeta &index_meta, const std::vector<const FieldMeta *> &field_metas)
 {
   index_meta_ = index_meta;
-  field_metas_ = field_metas;
   
-  // ⭐ 计算复合键长度
+  // ⭐ 复制对象而不是指针
+  field_metas_.clear();
   key_length_ = 0;
-  for (const FieldMeta *field : field_metas_) {
-    key_length_ += field->len();
+  for (const FieldMeta *field : field_metas) {
+    if (field != nullptr) {
+      field_metas_.push_back(*field);  // 复制对象！
+      key_length_ += field->len();
+    }
   }
   
   return RC::SUCCESS;
