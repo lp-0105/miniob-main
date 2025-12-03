@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/expr/expression.h"
 #include "sql/expr/tuple.h"
 #include "sql/expr/arithmetic_operator.hpp"
+#include <climits>  // 或 #include <limits.h>
 
 using namespace std;
 
@@ -143,7 +144,13 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
 {
   RC  rc         = RC::SUCCESS;
   int cmp_result = left.compare(right);
-  result         = false;
+  
+  // 检查是否是无效日期（返回 INT_MIN）
+  if (cmp_result == INT_MIN) {
+    return RC::INVALID_ARGUMENT;  // 无效日期，返回错误
+  }
+  
+  result = false;
   switch (comp_) {
     case EQUAL_TO: {
       result = (0 == cmp_result);

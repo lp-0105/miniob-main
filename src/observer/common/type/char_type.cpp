@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/value.h"
 #include <cstdlib>  // for atoi, atof
 #include <cstring>  // for strcmp
+#include <climits>  // 添加这个头文件
 
 int CharType::compare(const Value &left, const Value &right) const
 {
@@ -25,17 +26,37 @@ int CharType::compare(const Value &left, const Value &right) const
     return -DataType::type_instance(AttrType::DATES)->compare(right, left);
   }
   
-  // 如果右边也是 CHARS，尝试判断是否都是日期格式
+  // 如果右边也是 CHARS
   if (right.attr_type() == AttrType::CHARS) {
     int ly, lm, ld, ry, rm, rd;
-    bool left_is_date = DateType::parse_date(left.get_string().c_str(), ly, lm, ld);
-    bool right_is_date = DateType::parse_date(right.get_string().c_str(), ry, rm, rd);
     
-    // 两边都能解析为日期，按日期数值比较
-    if (left_is_date && right_is_date) {
+    std::string left_str = left.get_string();
+    std::string right_str = right.get_string();
+    
+    // 检查是否看起来像日期格式 (YYYY-M-D 或 YYYY-MM-DD)
+    auto looks_like_date = [](const std::string &s) { 
+      int y, m, d;
+      return sscanf(s.c_str(), "%d-%d-%d", &y, &m, &d) == 3;
+    };
+    
+    bool left_looks_date = looks_like_date(left_str);
+    bool right_looks_date = looks_like_date(right_str);
+    
+    bool left_valid = DateType::parse_date(left_str.c_str(), ly, lm, ld);
+    bool right_valid = DateType::parse_date(right_str.c_str(), ry, rm, rd);
+    
+    // 如果看起来像日期但验证失败 = 无效日期
+    if (left_looks_date && !left_valid) {
+      return INT_MIN;  // 特殊值表示无效日期
+    }
+    if (right_looks_date && !right_valid) {
+      return INT_MIN;  // 特殊值表示无效日期
+    }
+    
+    // 两边都是有效日期，按日期数值比较
+    if (left_valid && right_valid) {
       int left_val = DateType::date_to_int(ly, lm, ld);
       int right_val = DateType::date_to_int(ry, rm, rd);
-      
       if (left_val < right_val) return -1;
       if (left_val > right_val) return 1;
       return 0;
@@ -47,7 +68,7 @@ int CharType::compare(const Value &left, const Value &right) const
         (void *)right.value_.pointer_value_, right.length_);
   }
   
-  // 其他类型处理...
+  // 其他类型处理
   if (right.attr_type() == AttrType::INTS) {
     int left_int = atoi(left.value_.pointer_value_);
     int right_int = right.get_int();

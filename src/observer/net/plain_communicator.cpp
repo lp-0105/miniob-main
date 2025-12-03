@@ -197,9 +197,31 @@ RC PlainCommunicator::write_result_internal(SessionEvent *event, bool &need_disc
     return write_state(event, need_disconnect);
   }
 
+  // ============== 核心修改开始 ==============
+  // 1. 预读取第一行数据，用于检测运行时错误（如无效日期）
+  Tuple *first_tuple = nullptr;
+  RC first_rc = RC::SUCCESS;
+  
+  // 只有当不是 CHUNK 模式时才预读 (简化处理，且当前问题只出现在普通模式)
+  bool is_chunk_mode = event->session()->get_execution_mode() == ExecutionMode::CHUNK_ITERATOR
+                       && event->session()->used_chunk_mode();
+  
+  if (!is_chunk_mode) {
+    first_rc = sql_result->next_tuple(first_tuple);
+    
+    // 如果第一行读取失败，且不是 EOF (说明是真的出错了)
+    if (first_rc != RC::SUCCESS && first_rc != RC::RECORD_EOF) {
+      sql_result->close();
+      sql_result->set_return_code(first_rc);
+      return write_state(event, need_disconnect); // 直接返回错误，不输出表头
+    }
+  }
+  // ============== 核心修改结束 ==============
+
   const TupleSchema &schema   = sql_result->tuple_schema();
   const int          cell_num = schema.cell_num();
 
+  // 2. 输出表头 (现在安全了，因为如果没有错误才走到这里)
   for (int i = 0; i < cell_num; i++) {
     const TupleCellSpec &spec  = schema.cell_at(i);
     const char          *alias = spec.alias();
@@ -237,11 +259,44 @@ RC PlainCommunicator::write_result_internal(SessionEvent *event, bool &need_disc
   }
 
   rc = RC::SUCCESS;
-  if (event->session()->get_execution_mode() == ExecutionMode::CHUNK_ITERATOR
-      && event->session()->used_chunk_mode()) {
+  if (is_chunk_mode) {
     rc = write_chunk_result(sql_result);
   } else {
-    rc = write_tuple_result(sql_result);
+    // ============== 核心修改开始 ==============
+    // 3. 如果预读到了第一行数据，需要先手动输出这一行
+    if (first_rc == RC::SUCCESS && first_tuple != nullptr) {
+      // 手动输出第一行 (逻辑复制自 write_tuple_result 的内部循环)
+      int tuple_cell_num = first_tuple->cell_num();
+      for (int i = 0; i < tuple_cell_num; i++) {
+        if (i != 0) {
+          const char *delim = " | ";
+          rc = writer_->writen(delim, strlen(delim));
+          if (OB_FAIL(rc)) { sql_result->close(); return rc; }
+        }
+        Value value;
+        rc = first_tuple->cell_at(i, value);
+        if (rc != RC::SUCCESS) { sql_result->close(); return rc; }
+        
+        string cell_str = value.to_string();
+        rc = writer_->writen(cell_str.data(), cell_str.size());
+        if (OB_FAIL(rc)) { sql_result->close(); return rc; }
+      }
+      char newline = '\n';
+      rc = writer_->writen(&newline, 1);
+      if (OB_FAIL(rc)) { sql_result->close(); return rc; }
+      
+      // 继续输出剩余行
+      rc = write_tuple_result(sql_result);
+    }
+    else if (first_rc == RC::RECORD_EOF) {
+      // 第一行就是 EOF，说明没有数据，直接设置成功
+      rc = RC::SUCCESS;
+    }
+    else {
+      // 理论上不会走到这，除非是 chunk 模式或其他情况
+      rc = write_tuple_result(sql_result);
+    }
+    // ============== 核心修改结束 ==============
   }
 
   if (OB_FAIL(rc)) {
@@ -249,9 +304,6 @@ RC PlainCommunicator::write_result_internal(SessionEvent *event, bool &need_disc
   }
 
   if (cell_num == 0) {
-    // 除了select之外，其它的消息通常不会通过operator来返回结果，表头和行数据都是空的
-    // 这里针对这种情况做特殊处理，当表头和行数据都是空的时候，就返回处理的结果
-    // 可能是insert/delete等操作，不直接返回给客户端数据，这里把处理结果返回给客户端
     RC rc_close = sql_result->close();
     if (rc == RC::SUCCESS) {
       rc = rc_close;
