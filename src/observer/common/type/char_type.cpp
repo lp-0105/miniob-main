@@ -11,6 +11,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/comparator.h"
 #include "common/log/log.h"
 #include "common/type/char_type.h"
+#include "common/type/date_type.h"
 #include "common/value.h"
 #include <cstdlib>  // for atoi, atof
 #include <cstring>  // for strcmp
@@ -19,21 +20,40 @@ int CharType::compare(const Value &left, const Value &right) const
 {
   ASSERT(left.attr_type() == AttrType::CHARS, "left type is not CHARS");
   
-  // 如果右边也是字符串，直接比较
+  // 处理与 DATES 类型的比较
+  if (right.attr_type() == AttrType::DATES) {
+    return -DataType::type_instance(AttrType::DATES)->compare(right, left);
+  }
+  
+  // 如果右边也是 CHARS，尝试判断是否都是日期格式
   if (right.attr_type() == AttrType::CHARS) {
+    int ly, lm, ld, ry, rm, rd;
+    bool left_is_date = DateType::parse_date(left.get_string().c_str(), ly, lm, ld);
+    bool right_is_date = DateType::parse_date(right.get_string().c_str(), ry, rm, rd);
+    
+    // 两边都能解析为日期，按日期数值比较
+    if (left_is_date && right_is_date) {
+      int left_val = DateType::date_to_int(ly, lm, ld);
+      int right_val = DateType::date_to_int(ry, rm, rd);
+      
+      if (left_val < right_val) return -1;
+      if (left_val > right_val) return 1;
+      return 0;
+    }
+    
+    // 普通字符串比较
     return common::compare_string(
         (void *)left.value_.pointer_value_, left.length_,
         (void *)right.value_.pointer_value_, right.length_);
   }
   
-  // ⭐ 如果右边是整数，将字符串转换为整数进行比较
+  // 其他类型处理...
   if (right.attr_type() == AttrType::INTS) {
-    int left_int = atoi(left.value_.pointer_value_);  // 字符串转整数
+    int left_int = atoi(left.value_.pointer_value_);
     int right_int = right.get_int();
     return left_int - right_int;
   }
   
-  // ⭐ 如果右边是浮点数，将字符串转换为浮点数进行比较
   if (right.attr_type() == AttrType::FLOATS) {
     float left_float = (float)atof(left.value_.pointer_value_);
     float right_float = right.get_float();
@@ -42,7 +62,6 @@ int CharType::compare(const Value &left, const Value &right) const
     return 0;
   }
   
-  // 其他类型，转为字符串比较
   return strcmp(left.value_.pointer_value_, right.to_string().c_str());
 }
 

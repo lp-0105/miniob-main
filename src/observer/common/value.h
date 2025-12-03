@@ -48,6 +48,7 @@ public:
   explicit Value(bool val);
   explicit Value(const char *s, int len = 0);
   explicit Value(const string_t &val);
+  explicit Value(const char *date_str, AttrType type);
 
   Value(const Value &other);
   Value(Value &&other);

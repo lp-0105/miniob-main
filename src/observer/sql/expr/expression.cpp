@@ -267,6 +267,8 @@ RC ComparisonExpr::eval(Chunk &chunk, vector<uint8_t> &select)
       select[i] &= result ? 1 : 0;
     }
 
+  } else if (left_column.attr_type() == AttrType::DATES) {
+    rc = compare_column<int>(left_column, right_column, select);
   } else {
     LOG_WARN("unsupported data type %d", left_column.attr_type());
     return RC::INTERNAL;

@@ -30,6 +30,22 @@ Value::Value(const char *s, int len /*= 0*/) { set_string(s, len); }
 
 Value::Value(const string_t& s) { set_string(s.data(), s.size()); }
 
+// 日期字符串构造函数
+Value::Value(const char *date_str, AttrType type) {
+  if (type == AttrType::DATES) {
+    int year, month, day;
+    if (parse_date(date_str, year, month, day)) {
+      int date_int = year * 10000 + month * 100 + day;  // 手动计算日期整数
+      set_date(date_int);
+    } else {
+      // 解析失败，设置为默认日期
+      set_date(0);
+    }
+  } else {
+    set_string(date_str);
+  }
+}
+
 
 Value::Value(const Value &other)
 {
@@ -252,7 +268,10 @@ string Value::to_string() const
   return res;
 }
 
-int Value::compare(const Value &other) const { return DataType::type_instance(this->attr_type_)->compare(*this, other); }
+int Value::compare(const Value &other) const 
+{ 
+  return DataType::type_instance(this->attr_type_)->compare(*this, other); 
+}
 
 int Value::get_int() const
 {
