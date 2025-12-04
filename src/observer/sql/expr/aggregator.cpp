@@ -34,3 +34,15 @@ RC SumAggregator::evaluate(Value& result)
   result = value_;
   return RC::SUCCESS;
 }
+
+RC CountAggregator::accumulate(const Value &value)
+{
+  count_++;
+  return RC::SUCCESS;
+}
+
+RC CountAggregator::evaluate(Value& result)
+{
+  result = Value(count_);
+  return RC::SUCCESS;
+}
