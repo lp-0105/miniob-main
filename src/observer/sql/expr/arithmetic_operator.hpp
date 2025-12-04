@@ -10,6 +10,8 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#include <limits>
+
 #if defined(USE_SIMD)
 #include "common/math/simd_util.h"
 #endif
@@ -177,7 +179,16 @@ struct DivideOperator
   template <class T>
   static inline T operation(T left, T right)
   {
-    // TODO: `right = 0` is invalid
+    // 处理除以0的情况
+    if (right == 0) {
+      // 对于整数类型，返回最大值作为错误指示
+      if constexpr (std::is_integral_v<T>) {
+        return std::numeric_limits<T>::max();
+      } else {
+        // 对于浮点数类型，返回最大值作为错误指示
+        return std::numeric_limits<T>::max();
+      }
+    }
     return left / right;
   }
 

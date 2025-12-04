@@ -14,9 +14,15 @@ See the Mulan PSL v2 for more details. */
 #include "common/type/integer_type.h"
 #include "common/value.h"
 #include "storage/common/column.h"
+#include <limits>
 
 int IntegerType::compare(const Value &left, const Value &right) const
 {
+  // 处理 NULL 值比较
+  if (left.is_null() || right.is_null()) {
+    return -2; // 表示不可比较（NULL与任何值比较都返回NULL）
+  }
+  
   ASSERT(left.attr_type() == AttrType::INTS, "left type is not integer");
   ASSERT(right.attr_type() == AttrType::INTS || right.attr_type() == AttrType::FLOATS, "right type is not numeric");
   if (right.attr_type() == AttrType::INTS) {
@@ -53,24 +59,65 @@ RC IntegerType::cast_to(const Value &val, AttrType type, Value &result) const
 
 RC IntegerType::add(const Value &left, const Value &right, Value &result) const
 {
+  // 处理 NULL 值运算
+  if (left.is_null() || right.is_null()) {
+    result.set_null();
+    return RC::SUCCESS;
+  }
+  
   result.set_int(left.get_int() + right.get_int());
   return RC::SUCCESS;
 }
 
 RC IntegerType::subtract(const Value &left, const Value &right, Value &result) const
 {
+  // 处理 NULL 值运算
+  if (left.is_null() || right.is_null()) {
+    result.set_null();
+    return RC::SUCCESS;
+  }
+  
   result.set_int(left.get_int() - right.get_int());
   return RC::SUCCESS;
 }
 
 RC IntegerType::multiply(const Value &left, const Value &right, Value &result) const
 {
+  // 处理 NULL 值运算
+  if (left.is_null() || right.is_null()) {
+    result.set_null();
+    return RC::SUCCESS;
+  }
+  
   result.set_int(left.get_int() * right.get_int());
+  return RC::SUCCESS;
+}
+
+RC IntegerType::divide(const Value &left, const Value &right, Value &result) const
+{
+  // 处理 NULL 值运算
+  if (left.is_null() || right.is_null()) {
+    result.set_null();
+    return RC::SUCCESS;
+  }
+  
+  if (right.get_int() == 0) {
+    // NOTE: 除数为0时返回NULL ⭐ 修改
+    result.set_null();
+  } else {
+    result.set_int(left.get_int() / right.get_int());
+  }
   return RC::SUCCESS;
 }
 
 RC IntegerType::negative(const Value &val, Value &result) const
 {
+  // 处理 NULL 值运算
+  if (val.is_null()) {
+    result.set_null();
+    return RC::SUCCESS;
+  }
+  
   result.set_int(-val.get_int());
   return RC::SUCCESS;
 }

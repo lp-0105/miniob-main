@@ -43,6 +43,11 @@ bool DateType::parse_date(const char *str, int &year, int &month, int &day)
 
 int DateType::compare(const Value &left, const Value &right) const
 {
+  // 处理 NULL 值比较
+  if (left.is_null() || right.is_null()) {
+    return -2; // 表示不可比较（NULL与任何值比较都返回NULL）
+  }
+  
   int left_val = 0, right_val = 0;
   
   // 处理左值

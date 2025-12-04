@@ -21,6 +21,11 @@ int CharType::compare(const Value &left, const Value &right) const
 {
   ASSERT(left.attr_type() == AttrType::CHARS, "left type is not CHARS");
   
+  // 处理 NULL 值比较
+  if (left.is_null() || right.is_null()) {
+    return -2; // 表示不可比较（NULL与任何值比较都返回NULL）
+  }
+  
   // 处理与 DATES 类型的比较
   if (right.attr_type() == AttrType::DATES) {
     return -DataType::type_instance(AttrType::DATES)->compare(right, left);

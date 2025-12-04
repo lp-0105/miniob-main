@@ -64,6 +64,14 @@ public:
   static bool parse_date(const char *str, int &year, int &month, int &day);
   static bool is_valid_date(int year, int month, int day);
 
+  // NULL支持函数 ⭐ 新增
+  bool is_null() const { return attr_type_ == AttrType::NULLS; }
+  void set_null() { 
+    reset(); 
+    attr_type_ = AttrType::NULLS; 
+    length_ = 0;
+  }
+
   void reset();
 
   static RC add(const Value &left, const Value &right, Value &result)

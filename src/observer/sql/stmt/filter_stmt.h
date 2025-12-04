@@ -47,22 +47,30 @@ class FilterUnit
 {
 public:
   FilterUnit() = default;
-  ~FilterUnit() {}
+  ~FilterUnit() 
+  {
+    if (left_expr_) {
+      delete left_expr_;
+    }
+    if (right_expr_) {
+      delete right_expr_;
+    }
+  }
 
   void set_comp(CompOp comp) { comp_ = comp; }
 
   CompOp comp() const { return comp_; }
 
-  void set_left(const FilterObj &obj) { left_ = obj; }
-  void set_right(const FilterObj &obj) { right_ = obj; }
+  void set_left(Expression *expr) { left_expr_ = expr; }
+  void set_right(Expression *expr) { right_expr_ = expr; }
 
-  const FilterObj &left() const { return left_; }
-  const FilterObj &right() const { return right_; }
+  Expression *left() const { return left_expr_; }
+  Expression *right() const { return right_expr_; }
 
 private:
-  CompOp    comp_ = NO_OP;
-  FilterObj left_;
-  FilterObj right_;
+  CompOp comp_ = NO_OP;
+  Expression *left_expr_ = nullptr;
+  Expression *right_expr_ = nullptr;
 };
 
 /**

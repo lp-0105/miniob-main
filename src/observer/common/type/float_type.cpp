@@ -19,6 +19,11 @@ See the Mulan PSL v2 for more details. */
 
 int FloatType::compare(const Value &left, const Value &right) const
 {
+  // 处理 NULL 值比较
+  if (left.is_null() || right.is_null()) {
+    return -2; // 表示不可比较（NULL与任何值比较都返回NULL）
+  }
+  
   ASSERT(left.attr_type() == AttrType::FLOATS, "left type is not float");
   ASSERT(right.attr_type() == AttrType::INTS || right.attr_type() == AttrType::FLOATS, "right type is not numeric");
   float left_val  = left.get_float();
@@ -36,26 +41,49 @@ int FloatType::compare(const Column &left, const Column &right, int left_idx, in
 
 RC FloatType::add(const Value &left, const Value &right, Value &result) const
 {
+  // 处理 NULL 值运算
+  if (left.is_null() || right.is_null()) {
+    result.set_null();
+    return RC::SUCCESS;
+  }
+  
   result.set_float(left.get_float() + right.get_float());
   return RC::SUCCESS;
 }
 RC FloatType::subtract(const Value &left, const Value &right, Value &result) const
 {
+  // 处理 NULL 值运算
+  if (left.is_null() || right.is_null()) {
+    result.set_null();
+    return RC::SUCCESS;
+  }
+  
   result.set_float(left.get_float() - right.get_float());
   return RC::SUCCESS;
 }
 RC FloatType::multiply(const Value &left, const Value &right, Value &result) const
 {
+  // 处理 NULL 值运算
+  if (left.is_null() || right.is_null()) {
+    result.set_null();
+    return RC::SUCCESS;
+  }
+  
   result.set_float(left.get_float() * right.get_float());
   return RC::SUCCESS;
 }
 
 RC FloatType::divide(const Value &left, const Value &right, Value &result) const
 {
+  // 处理 NULL 值运算
+  if (left.is_null() || right.is_null()) {
+    result.set_null();
+    return RC::SUCCESS;
+  }
+  
   if (right.get_float() > -EPSILON && right.get_float() < EPSILON) {
-    // NOTE:
-    // 设置为浮点数最大值是不正确的。通常的做法是设置为NULL，但是当前的miniob没有NULL概念，所以这里设置为浮点数最大值。
-    result.set_float(numeric_limits<float>::max());
+    // NOTE: 除数为0时返回NULL ⭐ 修改
+    result.set_null();
   } else {
     result.set_float(left.get_float() / right.get_float());
   }
@@ -64,6 +92,12 @@ RC FloatType::divide(const Value &left, const Value &right, Value &result) const
 
 RC FloatType::negative(const Value &val, Value &result) const
 {
+  // 处理 NULL 值运算
+  if (val.is_null()) {
+    result.set_null();
+    return RC::SUCCESS;
+  }
+  
   result.set_float(-val.get_float());
   return RC::SUCCESS;
 }

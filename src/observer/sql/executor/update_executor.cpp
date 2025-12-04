@@ -82,32 +82,16 @@ RC UpdateExecutor::execute(SQLStageEvent *sql_event)
     for (const FilterUnit *unit : filter_stmt->filter_units()) {
       ConditionSqlNode condition;
       
-      // 设置左操作数
-      const FilterObj &left = unit->left();
-      if (left.is_attr) {
-        condition.left_is_attr = 1;
-        condition.left_attr.relation_name = left.field.table()->name();
-        condition.left_attr.attribute_name = left.field.field_name();
-      } else {
-        condition.left_is_attr = 0;
-        condition.left_value = left.value;
-      }
+      // 设置左操作数表达式
+      condition.left_expr = unique_ptr<Expression>(unit->left()->copy().release());
       
-      // 设置右操作数
-      const FilterObj &right = unit->right();
-      if (right.is_attr) {
-        condition.right_is_attr = 1;
-        condition.right_attr.relation_name = right.field.table()->name();
-        condition.right_attr.attribute_name = right.field.field_name();
-      } else {
-        condition.right_is_attr = 0;
-        condition.right_value = right.value;
-      }
+      // 设置右操作数表达式
+      condition.right_expr = unique_ptr<Expression>(unit->right()->copy().release());
       
       // 设置比较操作符
       condition.comp = unit->comp();
       
-      conditions.push_back(condition);
+      conditions.push_back(std::move(condition));
     }
   }
   

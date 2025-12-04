@@ -183,34 +183,40 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
 
   // 将JOIN条件合并到FilterStmt中
   // 遍历所有JOIN表，将JOIN条件转换为ConditionSqlNode并添加到FilterStmt中
-  vector<ConditionSqlNode> all_conditions(select_sql.conditions);
+  vector<ConditionSqlNode> all_conditions;
+  all_conditions.reserve(select_sql.conditions.size());
+  for (auto &condition : select_sql.conditions) {
+    all_conditions.push_back(std::move(condition));
+  }
   
   for (const auto &join_table_sql : select_sql.join_tables) {
     for (const auto &join_condition_sql : join_table_sql.join_conditions) {
       ConditionSqlNode condition;
       condition.comp = join_condition_sql.comp;
       
-      // 处理左操作数 - 使用 left_is_attr 标志位判断
+      // 处理左操作数 - 创建对应的表达式
       if (join_condition_sql.left_is_attr) {
-        condition.left_is_attr = 1;
-        condition.left_attr.relation_name = join_condition_sql.left_relation;
-        condition.left_attr.attribute_name = join_condition_sql.left_attribute;
+        // 创建字段表达式
+        condition.left_expr = std::make_unique<UnboundFieldExpr>(
+            join_condition_sql.left_relation, 
+            join_condition_sql.left_attribute);
       } else {
-        condition.left_is_attr = 0;
-        condition.left_value = join_condition_sql.left_value;
+        // 创建值表达式
+        condition.left_expr = std::make_unique<ValueExpr>(join_condition_sql.left_value);
       }
       
-      // 处理右操作数 - 使用 right_is_attr 标志位判断
+      // 处理右操作数 - 创建对应的表达式
       if (join_condition_sql.right_is_attr) {
-        condition.right_is_attr = 1;
-        condition.right_attr.relation_name = join_condition_sql.right_relation;
-        condition.right_attr.attribute_name = join_condition_sql.right_attribute;
+        // 创建字段表达式
+        condition.right_expr = std::make_unique<UnboundFieldExpr>(
+            join_condition_sql.right_relation, 
+            join_condition_sql.right_attribute);
       } else {
-        condition.right_is_attr = 0;
-        condition.right_value = join_condition_sql.right_value;
+        // 创建值表达式
+        condition.right_expr = std::make_unique<ValueExpr>(join_condition_sql.right_value);
       }
       
-      all_conditions.push_back(condition);
+      all_conditions.push_back(std::move(condition));
     }
   }
   
