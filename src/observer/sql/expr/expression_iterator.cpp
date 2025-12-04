@@ -34,7 +34,14 @@ RC ExpressionIterator::iterate_child_expr(Expression &expr, function<RC(unique_p
       rc = callback(comparison_expr.left());
 
       if (OB_SUCC(rc)) {
-        rc = callback(comparison_expr.right());
+        // 比较表达式必须有两个操作数，right() 不应该为 nullptr
+        auto &right_expr = comparison_expr.right();
+        if (right_expr) {
+          rc = callback(right_expr);
+        } else {
+          LOG_WARN("Comparison expression has null right operand");
+          rc = RC::INVALID_ARGUMENT;
+        }
       }
 
     } break;
@@ -54,7 +61,12 @@ RC ExpressionIterator::iterate_child_expr(Expression &expr, function<RC(unique_p
       auto &arithmetic_expr = static_cast<ArithmeticExpr &>(expr);
       rc = callback(arithmetic_expr.left());
       if (OB_SUCC(rc)) {
-        rc = callback(arithmetic_expr.right());
+        // 对于一元运算符（如 NEGATIVE），right() 可能为 nullptr
+        auto &right_expr = arithmetic_expr.right();
+        if (right_expr) {
+          rc = callback(right_expr);
+        }
+        // 一元运算符没有右操作数是正常的，不需要报错
       }
     } break;
 

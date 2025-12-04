@@ -247,7 +247,8 @@ RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &re
 
 RC ComparisonExpr::try_get_value(Value &cell) const
 {
-  if (left_->type() == ExprType::VALUE && right_->type() == ExprType::VALUE) {
+  // 对于一元运算符，right_ 可能为 nullptr
+  if (left_->type() == ExprType::VALUE && right_ && right_->type() == ExprType::VALUE) {
     ValueExpr *  left_value_expr  = static_cast<ValueExpr *>(left_.get());
     ValueExpr *  right_value_expr = static_cast<ValueExpr *>(right_.get());
     const Value &left_cell        = left_value_expr->get_value();
@@ -278,11 +279,14 @@ RC ComparisonExpr::get_value(const Tuple &tuple, Value &value) const
     return rc;
   }
   
-  rc = right_->get_value(tuple, right_value);
-  // 删除调试printf语句
-  if (rc != RC::SUCCESS) {
+  // 对于一元运算符，right_ 可能为 nullptr
+  if (right_) {
+    rc = right_->get_value(tuple, right_value);
     // 删除调试printf语句
-    return rc;
+    if (rc != RC::SUCCESS) {
+      // 删除调试printf语句
+      return rc;
+    }
   }
   
   // 删除调试printf语句
@@ -307,6 +311,13 @@ RC ComparisonExpr::eval(Chunk &chunk, vector<uint8_t> &select)
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
     return rc;
   }
+  
+  // 对于一元运算符，right_ 可能为 nullptr，但比较表达式需要两个操作数
+  if (!right_) {
+    LOG_WARN("comparison expression requires both left and right operands");
+    return RC::INVALID_ARGUMENT;
+  }
+  
   rc = right_->get_column(chunk, right_column);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
@@ -418,8 +429,16 @@ bool ArithmeticExpr::equal(const Expression &other) const
     return false;
   }
   auto &other_arith_expr = static_cast<const ArithmeticExpr &>(other);
-  return arithmetic_type_ == other_arith_expr.arithmetic_type() && left_->equal(*other_arith_expr.left_) &&
-         right_->equal(*other_arith_expr.right_);
+  
+  // 对于一元运算符（如 NEGATIVE），right_ 可能为 nullptr
+  if (right_ && other_arith_expr.right_) {
+    return arithmetic_type_ == other_arith_expr.arithmetic_type() && left_->equal(*other_arith_expr.left_) &&
+           right_->equal(*other_arith_expr.right_);
+  } else if (!right_ && !other_arith_expr.right_) {
+    return arithmetic_type_ == other_arith_expr.arithmetic_type() && left_->equal(*other_arith_expr.left_);
+  } else {
+    return false; // 一个表达式有右操作数，另一个没有
+  }
 }
 AttrType ArithmeticExpr::value_type() const
 {
@@ -552,11 +571,16 @@ RC ArithmeticExpr::get_value(const Tuple &tuple, Value &value) const
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
     return rc;
   }
-  rc = right_->get_value(tuple, right_value);
-  if (rc != RC::SUCCESS) {
-    LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
-    return rc;
+  
+  // 对于一元运算符（如 NEGATIVE），right_ 为 nullptr
+  if (right_ != nullptr) {
+    rc = right_->get_value(tuple, right_value);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
+      return rc;
+    }
   }
+  
   return calc_value(left_value, right_value, value);
 }
 
@@ -575,11 +599,16 @@ RC ArithmeticExpr::get_column(Chunk &chunk, Column &column)
     LOG_WARN("failed to get column of left expression. rc=%s", strrc(rc));
     return rc;
   }
-  rc = right_->get_column(chunk, right_column);
-  if (rc != RC::SUCCESS) {
-    LOG_WARN("failed to get column of right expression. rc=%s", strrc(rc));
-    return rc;
+  
+  // 对于一元运算符（如 NEGATIVE），right_ 为 nullptr
+  if (right_ != nullptr) {
+    rc = right_->get_column(chunk, right_column);
+    if (rc != RC::SUCCESS) {
+      LOG_WARN("failed to get column of right expression. rc=%s", strrc(rc));
+      return rc;
+    }
   }
+  
   return calc_column(left_column, right_column, column);
 }
 

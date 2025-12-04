@@ -1,16 +1,12 @@
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
-You use this software according to the terms and conditions of the Mulan PSL v2.
+You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
          http://license.coscl.org.cn/MulanPSL2
 THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
-
-//
-// Created by Wangyunlai on 2022/5/22.
-//
 
 #include "sql/stmt/filter_stmt.h"
 #include "common/lang/string.h"
@@ -99,6 +95,7 @@ static Expression* bind_expression(Expression *expr, Table *default_table, unord
     Expression *new_left = nullptr;
     Expression *new_right = nullptr;
     
+    // 绑定左表达式
     if (arith_expr->left()) {
       new_left = bind_expression(arith_expr->left().get(), default_table, tables);
       if (new_left == nullptr) {
@@ -106,6 +103,7 @@ static Expression* bind_expression(Expression *expr, Table *default_table, unord
       }
     }
     
+    // 只有非一元运算符才有右表达式（如 NEGATIVE 一元负号没有右操作数）
     if (arith_expr->right()) {
       new_right = bind_expression(arith_expr->right().get(), default_table, tables);
       if (new_right == nullptr) {
@@ -113,10 +111,11 @@ static Expression* bind_expression(Expression *expr, Table *default_table, unord
         return nullptr;  // 绑定失败
       }
     }
+    // 注意：对于一元运算符，new_right 保持为 nullptr，这是正确的
     
     // 创建新的算术表达式
     unique_ptr<Expression> left_ptr(new_left);
-    unique_ptr<Expression> right_ptr(new_right);
+    unique_ptr<Expression> right_ptr(new_right);  // 对于一元运算符可以为 nullptr
     
     ArithmeticExpr *new_expr = new ArithmeticExpr(arith_expr->arithmetic_type(), 
                                                    std::move(left_ptr), 
