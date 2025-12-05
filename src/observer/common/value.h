@@ -44,33 +44,16 @@ public:
   Value(AttrType attr_type, char *data, int length = 4) : attr_type_(attr_type) { this->set_data(data, length); }
 
   explicit Value(int val);
-  explicit Value(double val);
+  explicit Value(float val);
   explicit Value(bool val);
   explicit Value(const char *s, int len = 0);
   explicit Value(const string_t &val);
-  explicit Value(const char *date_str, AttrType type);
 
   Value(const Value &other);
   Value(Value &&other);
 
   Value &operator=(const Value &other);
   Value &operator=(Value &&other);
-
-  // 在 public 区域的构造函数部分添加
-  void set_date(int date_int);  // YYYYMMDD 格式
-  int  get_date() const;
-
-  // 静态辅助函数
-  static bool parse_date(const char *str, int &year, int &month, int &day);
-  static bool is_valid_date(int year, int month, int day);
-
-  // NULL支持函数 ⭐ 新增
-  bool is_null() const { return attr_type_ == AttrType::NULLS; }
-  void set_null() { 
-    reset(); 
-    attr_type_ = AttrType::NULLS; 
-    length_ = 0;
-  }
 
   void reset();
 
@@ -125,14 +108,14 @@ public:
    * 如果当前的类型与期望获取的类型不符，就会执行转换操作
    */
   int      get_int() const;
-  double   get_float() const;
+  float    get_float() const;
   string   get_string() const;
   string_t get_string_t() const;
   bool     get_boolean() const;
 
 public:
   void set_int(int val);
-  void set_float(double val);
+  void set_float(float val);
   void set_string(const char *s, int len = 0);
   void set_empty_string(int len);
   void set_string_from_other(const Value &other);
@@ -144,7 +127,7 @@ private:
   union Val
   {
     int32_t int_value_;
-    double  float_value_;  // 改为 double 以提高精度
+    float   float_value_;
     bool    bool_value_;
     char   *pointer_value_;
   } value_ = {.int_value_ = 0};

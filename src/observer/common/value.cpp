@@ -22,29 +22,13 @@ See the Mulan PSL v2 for more details. */
 
 Value::Value(int val) { set_int(val); }
 
-Value::Value(double val) { set_float(val); }
+Value::Value(float val) { set_float(val); }
 
 Value::Value(bool val) { set_boolean(val); }
 
 Value::Value(const char *s, int len /*= 0*/) { set_string(s, len); }
 
 Value::Value(const string_t& s) { set_string(s.data(), s.size()); }
-
-// 日期字符串构造函数
-Value::Value(const char *date_str, AttrType type) {
-  if (type == AttrType::DATES) {
-    int year, month, day;
-    if (parse_date(date_str, year, month, day)) {
-      int date_int = year * 10000 + month * 100 + day;  // 手动计算日期整数
-      set_date(date_int);
-    } else {
-      // 解析失败，设置为默认日期
-      set_date(0);
-    }
-  } else {
-    set_string(date_str);
-  }
-}
 
 
 Value::Value(const Value &other)
@@ -137,12 +121,8 @@ void Value::set_data(char *data, int length)
       length_           = length;
     } break;
     case AttrType::FLOATS: {
-      value_.float_value_ = *(double *)data;
+      value_.float_value_ = *(float *)data;
       length_             = length;
-    } break;
-    case AttrType::DATES: {  // ⭐ 新增
-      value_.int_value_ = *(int *)data;
-      length_           = length;
     } break;
     case AttrType::BOOLEANS: {
       value_.bool_value_ = *(int *)data != 0;
@@ -162,7 +142,7 @@ void Value::set_int(int val)
   length_           = sizeof(val);
 }
 
-void Value::set_float(double val)
+void Value::set_float(float val)
 {
   reset();
   attr_type_          = AttrType::FLOATS;
@@ -223,9 +203,6 @@ void Value::set_value(const Value &value)
     case AttrType::CHARS: {
       set_string(value.get_string().c_str());
     } break;
-    case AttrType::DATES: {  // ⭐ 新增
-      set_date(value.get_date());
-    } break;
     case AttrType::BOOLEANS: {
       set_boolean(value.get_boolean());
     } break;
@@ -268,10 +245,7 @@ string Value::to_string() const
   return res;
 }
 
-int Value::compare(const Value &other) const 
-{ 
-  return DataType::type_instance(this->attr_type_)->compare(*this, other); 
-}
+int Value::compare(const Value &other) const { return DataType::type_instance(this->attr_type_)->compare(*this, other); }
 
 int Value::get_int() const
 {
@@ -290,9 +264,6 @@ int Value::get_int() const
     case AttrType::FLOATS: {
       return (int)(value_.float_value_);
     }
-    case AttrType::DATES: {  // ⭐ 添加这个！
-      return value_.int_value_;
-    }
     case AttrType::BOOLEANS: {
       return (int)(value_.bool_value_);
     }
@@ -304,25 +275,25 @@ int Value::get_int() const
   return 0;
 }
 
-double Value::get_float() const
+float Value::get_float() const
 {
   switch (attr_type_) {
     case AttrType::CHARS: {
       try {
-        return stod(value_.pointer_value_);
+        return stof(value_.pointer_value_);
       } catch (exception const &ex) {
-        LOG_TRACE("failed to convert string to double. s=%s, ex=%s", value_.pointer_value_, ex.what());
+        LOG_TRACE("failed to convert string to float. s=%s, ex=%s", value_.pointer_value_, ex.what());
         return 0.0;
       }
     } break;
     case AttrType::INTS: {
-      return double(value_.int_value_);
+      return float(value_.int_value_);
     } break;
     case AttrType::FLOATS: {
       return value_.float_value_;
     } break;
     case AttrType::BOOLEANS: {
-      return double(value_.bool_value_);
+      return float(value_.bool_value_);
     } break;
     default: {
       LOG_WARN("unknown data type. type=%d", attr_type_);
@@ -377,55 +348,4 @@ bool Value::get_boolean() const
     }
   }
   return false;
-}
-
-// ⭐ 日期相关函数
-
-// 判断日期是否合法
-bool Value::is_valid_date(int year, int month, int day)
-{
-  if (year < 1 || year > 9999) return false;
-  if (month < 1 || month > 12) return false;
-  if (day < 1) return false;
-
-  int days_in_month[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-  
-  // 闰年判断
-  bool is_leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
-  if (is_leap) {
-    days_in_month[2] = 29;
-  }
-  
-  if (day > days_in_month[month]) return false;
-  
-  return true;
-}
-
-// 解析日期字符串 "YYYY-MM-DD"
-bool Value::parse_date(const char *str, int &year, int &month, int &day)
-{
-  if (str == nullptr) return false;
-  
-  int ret = sscanf(str, "%d-%d-%d", &year, &month, &day);
-  if (ret != 3) return false;
-  
-  return is_valid_date(year, month, day);
-}
-
-// 设置日期值
-void Value::set_date(int date_int)
-{
-  reset();
-  attr_type_        = AttrType::DATES;
-  value_.int_value_ = date_int;
-  length_           = sizeof(int);
-}
-
-// 获取日期值
-int Value::get_date() const
-{
-  if (attr_type_ == AttrType::DATES) {
-    return value_.int_value_;
-  }
-  return 0;
 }
