@@ -22,7 +22,7 @@ See the Mulan PSL v2 for more details. */
 
 Value::Value(int val) { set_int(val); }
 
-Value::Value(float val) { set_float(val); }
+Value::Value(double val) { set_float(val); }
 
 Value::Value(bool val) { set_boolean(val); }
 
@@ -137,7 +137,7 @@ void Value::set_data(char *data, int length)
       length_           = length;
     } break;
     case AttrType::FLOATS: {
-      value_.float_value_ = *(float *)data;
+      value_.float_value_ = *(double *)data;
       length_             = length;
     } break;
     case AttrType::DATES: {  // ⭐ 新增
@@ -162,7 +162,7 @@ void Value::set_int(int val)
   length_           = sizeof(val);
 }
 
-void Value::set_float(float val)
+void Value::set_float(double val)
 {
   reset();
   attr_type_          = AttrType::FLOATS;
@@ -304,25 +304,25 @@ int Value::get_int() const
   return 0;
 }
 
-float Value::get_float() const
+double Value::get_float() const
 {
   switch (attr_type_) {
     case AttrType::CHARS: {
       try {
-        return stof(value_.pointer_value_);
+        return stod(value_.pointer_value_);
       } catch (exception const &ex) {
-        LOG_TRACE("failed to convert string to float. s=%s, ex=%s", value_.pointer_value_, ex.what());
+        LOG_TRACE("failed to convert string to double. s=%s, ex=%s", value_.pointer_value_, ex.what());
         return 0.0;
       }
     } break;
     case AttrType::INTS: {
-      return float(value_.int_value_);
+      return double(value_.int_value_);
     } break;
     case AttrType::FLOATS: {
       return value_.float_value_;
     } break;
     case AttrType::BOOLEANS: {
-      return float(value_.bool_value_);
+      return double(value_.bool_value_);
     } break;
     default: {
       LOG_WARN("unknown data type. type=%d", attr_type_);

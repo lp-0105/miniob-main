@@ -44,7 +44,7 @@ public:
   Value(AttrType attr_type, char *data, int length = 4) : attr_type_(attr_type) { this->set_data(data, length); }
 
   explicit Value(int val);
-  explicit Value(float val);
+  explicit Value(double val);
   explicit Value(bool val);
   explicit Value(const char *s, int len = 0);
   explicit Value(const string_t &val);
@@ -125,14 +125,14 @@ public:
    * 如果当前的类型与期望获取的类型不符，就会执行转换操作
    */
   int      get_int() const;
-  float    get_float() const;
+  double   get_float() const;
   string   get_string() const;
   string_t get_string_t() const;
   bool     get_boolean() const;
 
 public:
   void set_int(int val);
-  void set_float(float val);
+  void set_float(double val);
   void set_string(const char *s, int len = 0);
   void set_empty_string(int len);
   void set_string_from_other(const Value &other);
@@ -144,7 +144,7 @@ private:
   union Val
   {
     int32_t int_value_;
-    float   float_value_;
+    double  float_value_;  // 改为 double 以提高精度
     bool    bool_value_;
     char   *pointer_value_;
   } value_ = {.int_value_ = 0};
