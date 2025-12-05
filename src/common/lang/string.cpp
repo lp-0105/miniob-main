@@ -271,17 +271,16 @@ char *substr(const char *s, int n1, int n2)
 string double_to_str(double v)
 {
   char buf[256];
-  // 处理 float->double 精度边界问题
-  double rounded_v = round(v * 100.0 + 1e-9) / 100.0;
+  double rounded_v = round(v * 100.0) / 100.0;
   snprintf(buf, sizeof(buf), "%.2f", rounded_v);
-  
   size_t len = strlen(buf);
-  while (len > 0 && buf[len - 1] == '0') {
+  while (buf[len - 1] == '0') {
     len--;
   }
-  if (len > 0 && buf[len - 1] == '.') {
+  if (buf[len - 1] == '.') {
     len--;
   }
+
   return string(buf, len);
 }
 }  // namespace common

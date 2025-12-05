@@ -48,12 +48,29 @@ public:
   explicit Value(bool val);
   explicit Value(const char *s, int len = 0);
   explicit Value(const string_t &val);
+  explicit Value(const char *date_str, AttrType type);
 
   Value(const Value &other);
   Value(Value &&other);
 
   Value &operator=(const Value &other);
   Value &operator=(Value &&other);
+
+  // 在 public 区域的构造函数部分添加
+  void set_date(int date_int);  // YYYYMMDD 格式
+  int  get_date() const;
+
+  // 静态辅助函数
+  static bool parse_date(const char *str, int &year, int &month, int &day);
+  static bool is_valid_date(int year, int month, int day);
+
+  // NULL支持函数 ⭐ 新增
+  bool is_null() const { return attr_type_ == AttrType::NULLS; }
+  void set_null() { 
+    reset(); 
+    attr_type_ = AttrType::NULLS; 
+    length_ = 0;
+  }
 
   void reset();
 
